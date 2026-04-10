@@ -1,78 +1,138 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import '../controllers/auth_controller.dart';
+import '../../splash/splash_screen.dart';
 
 class AuthScreen extends StatefulWidget {
   const AuthScreen({super.key});
+
   @override
   State<AuthScreen> createState() => _AuthScreenState();
 }
 
 class _AuthScreenState extends State<AuthScreen> {
-  final _emailCtrl = TextEditingController();
-  final _passCtrl = TextEditingController();
-  bool _isLogin = true;
-
-  @override
-  void dispose() {
-    _emailCtrl.dispose();
-    _passCtrl.dispose();
-    super.dispose();
-  }
-
-  void _submit() {
-    final auth = Get.find<AuthController>();
-    if (_isLogin) {
-      auth.signInWithEmail(_emailCtrl.text, _passCtrl.text);
-    } else {
-      auth.signUpWithEmail(_emailCtrl.text, _passCtrl.text);
-    }
-  }
+  final _emailController = TextEditingController(text: 'dev@chatkit.ai');
+  final _passwordController = TextEditingController(text: 'ChatKit@2025');
+  final _controller = Get.find<AuthController>();
+  bool _obscurePassword = true;
 
   @override
   Widget build(BuildContext context) {
-    final auth = Get.find<AuthController>();
+    final theme = Theme.of(context);
     return Scaffold(
-      appBar: AppBar(title: const Text('Authentication')),
-      body: Padding(
-        padding: const EdgeInsets.all(24.0),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            TextField(
-              controller: _emailCtrl,
-              decoration: const InputDecoration(labelText: 'Email'),
-              keyboardType: TextInputType.emailAddress,
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: _passCtrl,
-              decoration: const InputDecoration(labelText: 'Password'),
-              obscureText: true,
-            ),
-            const SizedBox(height: 16),
-            Obx(() {
-              if (auth.errorMessage.value != null) {
-                return Text(
-                  auth.errorMessage.value!,
-                  style: const TextStyle(color: Colors.red),
-                );
-              }
-              return const SizedBox.shrink();
-            }),
-            const SizedBox(height: 16),
-            Obx(() => auth.isLoading.value
-                ? const CircularProgressIndicator()
-                : ElevatedButton(
-                    onPressed: _submit,
-                    child: Text(_isLogin ? 'Login' : 'Sign Up'),
-                  )),
-            TextButton(
-              onPressed: () => setState(() => _isLogin = !_isLogin),
-              child: Text(
-                  _isLogin ? 'Create an account' : 'Already have an account?'),
-            ),
-          ],
+      body: Center(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              CustomPaint(
+                size: const Size(80, 80),
+                painter: ChatKitLogoPainter(color: theme.colorScheme.primary),
+              ),
+              const SizedBox(height: 24),
+              Text(
+                'ChatKit AI',
+                style: theme.textTheme.headlineLarge?.copyWith(
+                  fontWeight: FontWeight.bold,
+                  color: theme.colorScheme.primary,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Sign in to continue',
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: theme.colorScheme.outline,
+                ),
+              ),
+              const SizedBox(height: 48),
+              TextField(
+                controller: _emailController,
+                decoration: const InputDecoration(
+                  labelText: 'Email',
+                  prefixIcon: Icon(Icons.email_outlined),
+                  border: OutlineInputBorder(),
+                ),
+                keyboardType: TextInputType.emailAddress,
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: _passwordController,
+                decoration: InputDecoration(
+                  labelText: 'Password',
+                  prefixIcon: const Icon(Icons.lock_outlined),
+                  border: const OutlineInputBorder(),
+                  suffixIcon: IconButton(
+                    icon: Icon(
+                      _obscurePassword ? Icons.visibility_off : Icons.visibility,
+                    ),
+                    onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+                  ),
+                ),
+                obscureText: _obscurePassword,
+              ),
+              const SizedBox(height: 8),
+              Obx(() => _controller.errorMessage.value != null
+                  ? Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Text(
+                        _controller.errorMessage.value!,
+                        style: TextStyle(color: theme.colorScheme.error),
+                      ),
+                    )
+                  : const SizedBox.shrink()),
+              const SizedBox(height: 24),
+              SizedBox(
+                width: double.infinity,
+                height: 54,
+                child: Obx(() => ElevatedButton(
+                      onPressed: _controller.isLoading.value
+                          ? null
+                          : () => _controller.signIn(
+                                _emailController.text,
+                                _passwordController.text,
+                              ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: theme.colorScheme.primary,
+                        foregroundColor: theme.colorScheme.onPrimary,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: _controller.isLoading.value
+                          ? const CircularProgressIndicator(color: Colors.white)
+                          : const Text('Sign In', style: TextStyle(fontSize: 16)),
+                    )),
+              ),
+              const SizedBox(height: 48),
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.surfaceContainerHighest.withAlpha(50),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: theme.colorScheme.outlineVariant),
+                ),
+                child: Column(
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.info_outline, size: 16, color: theme.colorScheme.primary),
+                        const SizedBox(width: 8),
+                        const Text('Developer Info', style: TextStyle(fontWeight: FontWeight.bold)),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      'User must be created manually in Firebase Console before signing in.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: 12),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

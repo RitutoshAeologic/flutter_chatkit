@@ -1,42 +1,37 @@
 enum MessageRole { user, assistant }
-enum MessageStatus { sending, sent, failed }
 
 class ChatMessage {
   final String id;
   final String content;
   final MessageRole role;
-  final String sessionId;
-  final DateTime timestamp;
-  final MessageStatus status;
-  final String? errorMessage;
+  final DateTime createdAt;
+  final bool isLoading;
 
   ChatMessage({
     required this.id,
     required this.content,
     required this.role,
-    required this.sessionId,
-    required this.timestamp,
-    required this.status,
-    this.errorMessage,
+    required this.createdAt,
+    this.isLoading = false,
   });
 
-  ChatMessage copyWith({
-    String? id,
-    String? content,
-    MessageRole? role,
-    String? sessionId,
-    DateTime? timestamp,
-    MessageStatus? status,
-    String? errorMessage,
-  }) {
+  factory ChatMessage.fromJson(Map<String, dynamic> json) {
     return ChatMessage(
-      id: id ?? this.id,
-      content: content ?? this.content,
-      role: role ?? this.role,
-      sessionId: sessionId ?? this.sessionId,
-      timestamp: timestamp ?? this.timestamp,
-      status: status ?? this.status,
-      errorMessage: errorMessage ?? this.errorMessage,
+      id: json['id'] as String,
+      content: json['content'] as String,
+      role: json['role'] == 'user' ? MessageRole.user : MessageRole.assistant,
+      createdAt: DateTime.parse(json['createdAt'] as String),
+      isLoading: json['isLoading'] as bool? ?? false,
     );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'content': content,
+      'role': role == MessageRole.user ? 'user' : 'assistant',
+      'createdAt': createdAt.toIso8601String(),
+      'isLoading': isLoading,
+    };
   }
 }

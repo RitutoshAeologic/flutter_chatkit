@@ -63,12 +63,30 @@ export const chat = functions.https.onCall(async (data, context) => {
     const reply = json.choices[0].message.content;
 
     // Save metadata to Firestore
-    await db.collection("users").doc(uid).collection("sessions").doc(sessionId).set({
+    const sessionRef = db.collection("users").doc(uid).collection("sessions").doc(sessionId);
+    await sessionRef.set({
       displayTitle: message.substring(0, 30) + (message.length > 30 ? "..." : ""),
-      lastUpdated: admin.firestore.FieldValue.serverTimestamp()
+      lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
+      messageCount: admin.firestore.FieldValue.increment(2)
     }, { merge: true });
 
-    return { reply };
+    // Save user message
+    const userMsgRef = sessionRef.collection("messages").doc();
+    await userMsgRef.set({
+      content: message,
+      role: "user",
+      timestamp: admin.firestore.FieldValue.serverTimestamp()
+    });
+
+    // Save assistant reply
+    const astMsgRef = sessionRef.collection("messages").doc();
+    await astMsgRef.set({
+      content: reply,
+      role: "assistant",
+      timestamp: admin.firestore.FieldValue.serverTimestamp()
+    });
+
+    return { reply, messageId: astMsgRef.id };
   } catch (error) {
     console.error("Chat error:", error);
     throw new functions.https.HttpsError("internal", "Failed to communicate with AI");
@@ -85,9 +103,31 @@ export const listSessions = functions.https.onCall(async (data, context) => {
 
   return snapshot.docs.map(doc => ({
     id: doc.id,
-    displayTitle: doc.data().displayTitle,
-    messageCount: 0 // Mocked for simplicity
+    displayTitle: doc.data().displayTitle || "New Chat",
+    messageCount: doc.data().messageCount || 0
   }));
+});
+
+export const loadMessages = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "User must be logged in.");
+  }
+  const { sessionId } = data;
+  if (!sessionId) throw new functions.https.HttpsError("invalid-argument", "Missing sessionId");
+
+  const uid = context.auth.uid;
+  const snapshot = await db.collection("users").doc(uid).collection("sessions").doc(sessionId)
+    .collection("messages").orderBy("timestamp", "asc").get();
+
+  return snapshot.docs.map(doc => {
+    const d = doc.data();
+    return {
+      id: doc.id,
+      content: d.content,
+      role: d.role,
+      timestamp: d.timestamp ? d.timestamp.toDate().toISOString() : new Date().toISOString()
+    };
+  });
 });
 
 export const deleteSession = functions.https.onCall(async (data, context) => {

@@ -1,11 +1,11 @@
 class ChatSession {
   final String id;
   final String displayTitle;
-  final int messageCount;
+  final DateTime lastUpdated;
 
   ChatSession({
     required this.id,
     required this.displayTitle,
-    required this.messageCount,
+    required this.lastUpdated,
   });
 }
