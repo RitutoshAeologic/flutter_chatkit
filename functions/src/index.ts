@@ -1,143 +1,108 @@
-import * as functions from "firebase-functions";
-import * as admin from "firebase-admin";
+import { onCall, HttpsError } from 'firebase-functions/v2/https';
+import * as logger from 'firebase-functions/logger';
+import { Together } from 'together-ai';
+import * as admin from 'firebase-admin';
 
-admin.initializeApp();
+// Initialize Firebase Admin
+if (!admin.apps.length) {
+  admin.initializeApp();
+}
 
-const db = admin.firestore();
+// Initialize Together AI client
+const together = new Together({
+  apiKey: process.env.TOGETHER_API_KEY,
+});
 
-export const chat = functions.https.onCall(async (data, context) => {
-  if (!context.auth) {
-    throw new functions.https.HttpsError(
-      "unauthenticated",
-      "User must be logged in to chat."
-    );
-  }
+/**
+ * Cloud Function: askAI
+ */
+export const askAI = onCall(async (request) => {
+  const { message } = request.data;
 
-  const { message, sessionId, systemPrompt, temperature, maxTokens } = data;
-  const uid = context.auth.uid;
-
-  if (!message || !sessionId) {
-    throw new functions.https.HttpsError(
-      "invalid-argument",
-      "Missing message or sessionId"
-    );
-  }
-
-  // Get Together API key from environment config
-  // firebase functions:config:set together.api_key="YOUR_KEY_HERE"
-  const apiKey = functions.config().together?.api_key || process.env.TOGETHER_API_KEY;
-
-  if (!apiKey) {
-    throw new functions.https.HttpsError(
-      "failed-precondition",
-      "Together API key not configured"
-    );
+  if (!message || typeof message !== 'string') {
+    throw new HttpsError('invalid-argument', 'Message must be a string');
   }
 
   try {
-    // Note: Together AI free tier is suitable for testing.
-    const response = await fetch("https://api.together.xyz/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${apiKey}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        model: "togethercomputer/GPT-NeoXT-Chat-Base-20B",
-        messages: [
-          { role: "system", content: systemPrompt || "You are a friendly AI." },
-          { role: "user", content: message }
-        ],
-        temperature: temperature || 0.7,
-        max_tokens: maxTokens || 512
-      })
+    const response = await together.chat.completions.create({
+      model: 'meta-llama/Llama-3.3-70B-Instruct-Turbo',
+      messages: [
+        { role: 'system', content: 'You are ChatKit AI, a helpful and premium AI assistant.' },
+        { role: 'user', content: message }
+      ],
+      max_tokens: 512,
+      temperature: 0.7,
     });
 
-    if (!response.ok) {
-      const errBody = await response.text();
-      console.error("Together API Error:", errBody);
-      throw new functions.https.HttpsError("internal", "Error from AI provider");
-    }
-
-    const json = await response.json() as any;
-    const reply = json.choices[0].message.content;
-
-    // Save metadata to Firestore
-    const sessionRef = db.collection("users").doc(uid).collection("sessions").doc(sessionId);
-    await sessionRef.set({
-      displayTitle: message.substring(0, 30) + (message.length > 30 ? "..." : ""),
-      lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
-      messageCount: admin.firestore.FieldValue.increment(2)
-    }, { merge: true });
-
-    // Save user message
-    const userMsgRef = sessionRef.collection("messages").doc();
-    await userMsgRef.set({
-      content: message,
-      role: "user",
-      timestamp: admin.firestore.FieldValue.serverTimestamp()
-    });
-
-    // Save assistant reply
-    const astMsgRef = sessionRef.collection("messages").doc();
-    await astMsgRef.set({
-      content: reply,
-      role: "assistant",
-      timestamp: admin.firestore.FieldValue.serverTimestamp()
-    });
-
-    return { reply, messageId: astMsgRef.id };
-  } catch (error) {
-    console.error("Chat error:", error);
-    throw new functions.https.HttpsError("internal", "Failed to communicate with AI");
-  }
-});
-
-export const listSessions = functions.https.onCall(async (data, context) => {
-  if (!context.auth) {
-    throw new functions.https.HttpsError("unauthenticated", "User must be logged in.");
-  }
-  const uid = context.auth.uid;
-  const snapshot = await db.collection("users").doc(uid).collection("sessions")
-    .orderBy("lastUpdated", "desc").get();
-
-  return snapshot.docs.map(doc => ({
-    id: doc.id,
-    displayTitle: doc.data().displayTitle || "New Chat",
-    messageCount: doc.data().messageCount || 0
-  }));
-});
-
-export const loadMessages = functions.https.onCall(async (data, context) => {
-  if (!context.auth) {
-    throw new functions.https.HttpsError("unauthenticated", "User must be logged in.");
-  }
-  const { sessionId } = data;
-  if (!sessionId) throw new functions.https.HttpsError("invalid-argument", "Missing sessionId");
-
-  const uid = context.auth.uid;
-  const snapshot = await db.collection("users").doc(uid).collection("sessions").doc(sessionId)
-    .collection("messages").orderBy("timestamp", "asc").get();
-
-  return snapshot.docs.map(doc => {
-    const d = doc.data();
     return {
-      id: doc.id,
-      content: d.content,
-      role: d.role,
-      timestamp: d.timestamp ? d.timestamp.toDate().toISOString() : new Date().toISOString()
+      response: response.choices[0]?.message?.content || 'No response',
+      status: 'success',
     };
-  });
+  } catch (error) {
+    logger.error('Together AI Error:', error);
+    throw new HttpsError('internal', 'Internal error occurred');
+  }
 });
 
-export const deleteSession = functions.https.onCall(async (data, context) => {
-  if (!context.auth) {
-    throw new functions.https.HttpsError("unauthenticated", "User must be logged in.");
+/**
+ * Cloud Function: createChatSession
+ */
+export const createChatSession = onCall(async (request) => {
+  const { userId } = request.data;
+  if (!userId) throw new HttpsError('invalid-argument', 'User ID required');
+
+  const db = admin.firestore();
+  try {
+    const sessionRef = await db
+      .collection('users')
+      .doc(userId)
+      .collection('chat_sessions')
+      .add({
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        messageCount: 0,
+      });
+
+    return { sessionId: sessionRef.id };
+  } catch (error) {
+    throw new HttpsError('internal', 'Firestore error');
   }
-  const { id } = data;
-  if (!id) throw new functions.https.HttpsError("invalid-argument", "Missing session id");
-  
-  const uid = context.auth.uid;
-  await db.collection("users").doc(uid).collection("sessions").doc(id).delete();
-  return { success: true };
+});
+
+/**
+ * Cloud Function: saveMessage
+ */
+export const saveMessage = onCall(async (request) => {
+  const { userId, sessionId, message, response } = request.data;
+  if (!userId || !sessionId || !message) {
+    throw new HttpsError('invalid-argument', 'Missing fields');
+  }
+
+  const db = admin.firestore();
+  try {
+    const batch = db.batch();
+    const sessionPath = `users/${userId}/chat_sessions/${sessionId}`;
+    
+    batch.set(db.collection(`${sessionPath}/messages`).doc(), {
+      role: 'user',
+      content: message,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    batch.set(db.collection(`${sessionPath}/messages`).doc(), {
+      role: 'assistant',
+      content: response,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    batch.update(db.doc(sessionPath), {
+      messageCount: admin.firestore.FieldValue.increment(2),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    await batch.commit();
+    return { status: 'saved' };
+  } catch (error) {
+    throw new HttpsError('internal', 'Batch write error');
+  }
 });

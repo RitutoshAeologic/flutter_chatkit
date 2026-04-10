@@ -1,14 +1,31 @@
 import 'package:get/get.dart';
 import 'package:uuid/uuid.dart';
+import '../../auth/controllers/auth_controller.dart';
 import '../models/message.dart';
+import '../models/chat_session.dart';
 import '../services/chat_service.dart';
 
 class ChatController extends GetxController {
   final ChatService _service = Get.find<ChatService>();
+  final AuthController _auth = Get.find<AuthController>();
   final _uuid = const Uuid();
 
   final messages = <ChatMessage>[].obs;
   final isSending = false.obs;
+  final currentSession = Rxn<ChatSession>();
+
+  @override
+  void onInit() {
+    super.onInit();
+    _initializeChat();
+  }
+
+  Future<void> _initializeChat() async {
+    final user = _auth.user;
+    if (user != null) {
+      currentSession.value = await _service.createSession("New Chat", user.uid);
+    }
+  }
 
   Future<void> sendMessage(String text) async {
     if (text.trim().isEmpty || isSending.value) return;
@@ -24,7 +41,6 @@ class ChatController extends GetxController {
     isSending.value = true;
 
     try {
-      // Add a placeholder assistant message with isLoading = true
       final assistantPlaceholder = ChatMessage(
         id: 'loading-${_uuid.v4()}',
         content: '',
@@ -39,13 +55,11 @@ class ChatController extends GetxController {
         history: messages.where((m) => !m.isLoading && m.id != userMsg.id).toList(),
       );
       
-      // Replace placeholder with actual reply
       final index = messages.indexOf(assistantPlaceholder);
       if (index != -1) {
         messages[index] = reply;
       }
     } catch (e) {
-      // Remove loading indicator on error
       messages.removeWhere((m) => m.isLoading);
       Get.snackbar('Error', 'Failed to get a response.');
     } finally {
