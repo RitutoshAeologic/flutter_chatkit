@@ -49,3 +49,7 @@ android/app/google-services.json
 ios/Runner/GoogleService-Info.plist
 lib/firebase_options.dart
 .env
+
+# Firebase Functions
+functions/node_modules/
+functions/lib/
