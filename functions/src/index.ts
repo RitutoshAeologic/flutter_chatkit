@@ -1,0 +1,103 @@
+import * as functions from "firebase-functions";
+import * as admin from "firebase-admin";
+
+admin.initializeApp();
+
+const db = admin.firestore();
+
+export const chat = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError(
+      "unauthenticated",
+      "User must be logged in to chat."
+    );
+  }
+
+  const { message, sessionId, systemPrompt, temperature, maxTokens } = data;
+  const uid = context.auth.uid;
+
+  if (!message || !sessionId) {
+    throw new functions.https.HttpsError(
+      "invalid-argument",
+      "Missing message or sessionId"
+    );
+  }
+
+  // Get Together API key from environment config
+  // firebase functions:config:set together.api_key="YOUR_KEY_HERE"
+  const apiKey = functions.config().together?.api_key || process.env.TOGETHER_API_KEY;
+
+  if (!apiKey) {
+    throw new functions.https.HttpsError(
+      "failed-precondition",
+      "Together API key not configured"
+    );
+  }
+
+  try {
+    // Note: Together AI free tier is suitable for testing.
+    const response = await fetch("https://api.together.xyz/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        model: "togethercomputer/GPT-NeoXT-Chat-Base-20B",
+        messages: [
+          { role: "system", content: systemPrompt || "You are a friendly AI." },
+          { role: "user", content: message }
+        ],
+        temperature: temperature || 0.7,
+        max_tokens: maxTokens || 512
+      })
+    });
+
+    if (!response.ok) {
+      const errBody = await response.text();
+      console.error("Together API Error:", errBody);
+      throw new functions.https.HttpsError("internal", "Error from AI provider");
+    }
+
+    const json = await response.json() as any;
+    const reply = json.choices[0].message.content;
+
+    // Save metadata to Firestore
+    await db.collection("users").doc(uid).collection("sessions").doc(sessionId).set({
+      displayTitle: message.substring(0, 30) + (message.length > 30 ? "..." : ""),
+      lastUpdated: admin.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+
+    return { reply };
+  } catch (error) {
+    console.error("Chat error:", error);
+    throw new functions.https.HttpsError("internal", "Failed to communicate with AI");
+  }
+});
+
+export const listSessions = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "User must be logged in.");
+  }
+  const uid = context.auth.uid;
+  const snapshot = await db.collection("users").doc(uid).collection("sessions")
+    .orderBy("lastUpdated", "desc").get();
+
+  return snapshot.docs.map(doc => ({
+    id: doc.id,
+    displayTitle: doc.data().displayTitle,
+    messageCount: 0 // Mocked for simplicity
+  }));
+});
+
+export const deleteSession = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "User must be logged in.");
+  }
+  const { id } = data;
+  if (!id) throw new functions.https.HttpsError("invalid-argument", "Missing session id");
+  
+  const uid = context.auth.uid;
+  await db.collection("users").doc(uid).collection("sessions").doc(id).delete();
+  return { success: true };
+});
