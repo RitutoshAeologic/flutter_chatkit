@@ -10,9 +10,7 @@ void main() async {
 
   // Initialize Firebase
   await Firebase.initializeApp(
-    options: kIsWeb || defaultTargetPlatform != TargetPlatform.android
-        ? DefaultFirebaseOptions.currentPlatform
-        : null,
+    options: DefaultFirebaseOptions.currentPlatform,
   );
 
   // Initialize Local Storage (Shared Preferences wrapper)
