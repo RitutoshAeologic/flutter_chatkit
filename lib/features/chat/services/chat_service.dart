@@ -1,22 +1,28 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'package:firebase_database/firebase_database.dart';
 import '../models/message.dart';
 import '../models/chat_session.dart';
 import 'package:uuid/uuid.dart';
 
 class ChatService {
   final _uuid = const Uuid();
+  final _db = FirebaseDatabase.instance;
 
   // IMPORTANT: For production, move this to Firebase Cloud Functions.
   // Using direct connection for testing as requested.
-  static const String _togetherApiKey = "YOUR_TOGETHER_API_KEY_HERE";
-  static const String _togetherModel = "meta-llama/Llama-3.3-70B-Instruct-Turbo";
+  // static const String _togetherApiKey = "YOUR_TOGETHER_API_KEY_HERE";
+  // static const String _togetherModel = "meta-llama/Llama-3.3-70B-Instruct-Turbo";
 
-  /// Sends a message directly to Together AI.
+  // Groq API Configuration
+  static const String _groqApiKey = "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";
+  static const String _groqModel = "llama-3.3-70b-versatile";
+
+  /// Sends a message directly to Groq.
   Future<ChatMessage> sendMessage(String text, {List<ChatMessage>? history}) async {
     try {
-      if (_togetherApiKey == "YOUR_TOGETHER_API_KEY_HERE" || _togetherApiKey.isEmpty) {
-        return _getStubResponse("Please provide your Together AI API Key in `chat_service.dart` to enable real responses.");
+      if (_groqApiKey.isEmpty || _groqApiKey.startsWith("YOUR")) {
+        return _getStubResponse("Please provide your Groq API Key in `chat_service.dart` to enable real responses.");
       }
 
       final List<Map<String, String>> messages = [];
@@ -41,20 +47,16 @@ class ChatService {
       messages.add({"role": "user", "content": text});
 
       final response = await http.post(
-        Uri.parse('https://api.together.xyz/v1/chat/completions'),
+        Uri.parse('https://api.groq.com/openai/v1/chat/completions'),
         headers: {
-          'Authorization': 'Bearer $_togetherApiKey',
+          'Authorization': 'Bearer $_groqApiKey',
           'Content-Type': 'application/json',
         },
         body: jsonEncode({
-          "model": _togetherModel,
+          "model": _groqModel,
           "messages": messages,
           "max_tokens": 1024,
           "temperature": 0.7,
-          "top_p": 0.7,
-          "top_k": 50,
-          "repetition_penalty": 1,
-          "stream": false
         }),
       );
 
@@ -69,10 +71,116 @@ class ChatService {
           createdAt: DateTime.now(),
         );
       } else {
-        return _getStubResponse("API Error: ${response.statusCode} - ${response.body}");
+        return _getStubResponse("Groq API Error: ${response.statusCode}");
       }
     } catch (e) {
       return _getStubResponse("Connection Error: $e");
+    }
+  }
+
+  /// Generates an image using Pollinations.ai with enhanced parameters.
+  Future<String> generateImage(String prompt) async {
+    try {
+      final encodedPrompt = Uri.encodeComponent(prompt);
+      // Adding seed and quality params to ensure better consistency
+      final seed = DateTime.now().millisecondsSinceEpoch;
+      final imageUrl = "https://image.pollinations.ai/prompt/$encodedPrompt?width=1024&height=1024&nologo=true&seed=$seed";
+
+      // We skip the HEAD check here because Pollinations generates on the first GET request.
+      // A HEAD check might trigger generation but return before it's actually ready for the UI.
+      
+      // Safety delay to allow the API to acknowledge the request
+      await Future.delayed(const Duration(milliseconds: 1000));
+
+      return imageUrl;
+    } catch (e) {
+      print("Image generation failed: $e");
+      throw Exception('Failed to generate image. Please try again.');
+    }
+  }
+
+  /// Creates or gets a session in Realtime Database.
+  Future<String> createOrGetSession(String userId, {String? currentSessionId}) async {
+    if (currentSessionId != null && currentSessionId.isNotEmpty) {
+      return currentSessionId;
+    }
+
+    final sessionId = _uuid.v4();
+    final sessionRef = _db.ref('users/$userId/chat_sessions/$sessionId');
+
+    await sessionRef.set({
+      'sessionId': sessionId,
+      'title': 'New Chat',
+      'createdAt': DateTime.now().toIso8601String(),
+      'updatedAt': DateTime.now().toIso8601String(),
+    });
+
+    return sessionId;
+  }
+
+  /// Saves a message to Realtime Database.
+  Future<void> saveMessage(String userId, String sessionId, ChatMessage message) async {
+    try {
+      final messageRef = _db.ref('chat_messages/$sessionId/${message.id}');
+      await messageRef.set(message.toJson());
+
+      // Update session timestamp
+      await _db.ref('users/$userId/chat_sessions/$sessionId').update({
+        'updatedAt': DateTime.now().toIso8601String(),
+      });
+    } catch (e) {
+      print("RTDB Save Error: $e");
+    }
+  }
+
+  /// Loads messages for a specific session.
+  Future<List<ChatMessage>> loadMessages(String sessionId) async {
+    try {
+      final snapshot = await _db.ref('chat_messages/$sessionId').get();
+      if (!snapshot.exists) return [];
+
+      final data = Map<String, dynamic>.from(snapshot.value as Map);
+      final list = data.values.map((v) => ChatMessage.fromJson(Map<String, dynamic>.from(v as Map))).toList();
+      
+      list.sort((a, b) => a.createdAt.compareTo(b.createdAt));
+      return list;
+    } catch (e) {
+      print("RTDB Load Messages Error: $e");
+      return [];
+    }
+  }
+
+  /// Generates a smart title for the session (Step 6)
+  Future<void> updateSessionTitle(String userId, String sessionId, String content) async {
+    if (_groqApiKey.isEmpty || _groqApiKey.startsWith("YOUR")) return;
+    try {
+      if (content.isEmpty) return;
+
+      final response = await http.post(
+        Uri.parse('https://api.groq.com/openai/v1/chat/completions'),
+        headers: {
+          'Authorization': 'Bearer $_groqApiKey',
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode({
+          "model": _groqModel,
+          "messages": [
+            {"role": "system", "content": "Summarize the user request into a 3-5 word title. Return ONLY the title text."},
+            {"role": "user", "content": content}
+          ],
+          "max_tokens": 15,
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final title = data['choices'][0]['message']['content'].toString().replaceAll('"', '').trim();
+        if (title.isNotEmpty) {
+          await _db.ref('users/$userId/chat_sessions/$sessionId').update({'title': title});
+        }
+      }
+    } catch (e) {
+      print("Title update failed: $e");
     }
   }
 
@@ -85,27 +193,28 @@ class ChatService {
     );
   }
 
-  /// STUB: Creates a new chat session.
-  Future<ChatSession> createSession(String title) async {
-    return ChatSession(
-      id: _uuid.v4(),
-      displayTitle: title,
-      lastUpdated: DateTime.now(),
-    );
+  /// Lists all previous sessions.
+  Future<List<ChatSession>> listSessions(String userId) async {
+    try {
+      final snapshot = await _db.ref('users/$userId/chat_sessions').get();
+      if (!snapshot.exists) return [];
+
+      final data = Map<String, dynamic>.from(snapshot.value as Map);
+      return data.entries.map((e) {
+        final val = Map<String, dynamic>.from(e.value as Map);
+        return ChatSession(
+          id: e.key,
+          displayTitle: val['title'] ?? 'Untitled',
+          lastUpdated: DateTime.parse(val['updatedAt'] ?? DateTime.now().toIso8601String()),
+        );
+      }).toList()..sort((a, b) => b.lastUpdated.compareTo(a.lastUpdated));
+    } catch (e) {
+      return [];
+    }
   }
 
-  /// STUB: Lists all previous sessions.
-  Future<List<ChatSession>> listSessions() async {
-    return [];
-  }
-
-  /// STUB: Loads messages for a specific session.
-  Future<List<ChatMessage>> loadMessages(String sessionId) async {
-    return [];
-  }
-
-  /// STUB: Deletes a session.
-  Future<void> deleteSession(String id) async {
-    return;
+  Future<void> deleteSession(String userId, String id) async {
+    await _db.ref('users/$userId/chat_sessions/$id').remove();
+    await _db.ref('chat_messages/$id').remove();
   }
 }

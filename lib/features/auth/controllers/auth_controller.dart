@@ -4,6 +4,7 @@ import '../../../core/routes/app_routes.dart';
 
 class AuthController extends GetxController {
   final _auth = FirebaseAuth.instance;
+  User? get user => _auth.currentUser;
 
   final isLoading = false.obs;
   final errorMessage = RxnString();

@@ -6,6 +6,7 @@ import '../controllers/chat_controller.dart';
 import '../models/message.dart';
 import '../../auth/controllers/auth_controller.dart';
 import '../../splash/splash_screen.dart';
+import '../widgets/image_message_bubble.dart';
 
 class ChatScreen extends GetView<ChatController> {
   const ChatScreen({super.key});
@@ -30,11 +31,11 @@ class ChatScreen extends GetView<ChatController> {
         actions: [
           PopupMenuButton(
             itemBuilder: (context) => [
-              const PopupMenuItem(value: 'clear', child: Text('Clear chat')),
+              const PopupMenuItem(value: 'new', child: Text('New session')),
               const PopupMenuItem(value: 'logout', child: Text('Sign out')),
             ],
             onSelected: (value) {
-              if (value == 'clear') controller.clearChat();
+              if (value == 'new') controller.newSession();
               if (value == 'logout') Get.find<AuthController>().signOut();
             },
           ),
@@ -52,6 +53,9 @@ class ChatScreen extends GetView<ChatController> {
                 itemCount: controller.messages.length,
                 itemBuilder: (context, index) {
                   final message = controller.messages[index];
+                  if (message.type == MessageType.image) {
+                    return ImageMessageBubble(message: message);
+                  }
                   return _buildMessageBubble(message, theme);
                 },
               );
