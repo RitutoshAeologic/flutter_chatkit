@@ -1,9 +1,10 @@
+import 'dart:async';
 import 'package:get/get.dart';
 import 'package:uuid/uuid.dart';
-import '../../auth/controllers/auth_controller.dart';
 import '../models/message.dart';
 import '../models/chat_session.dart';
 import '../services/chat_service.dart';
+import '../../auth/controllers/auth_controller.dart';
 
 class ChatController extends GetxController {
   final ChatService _service = Get.find<ChatService>();
@@ -15,12 +16,15 @@ class ChatController extends GetxController {
   final isSending = false.obs;
   final isLoadingSessions = false.obs;
   final currentSession = Rxn<ChatSession>();
-  final inputText = "".obs;
 
   @override
   void onInit() {
     super.onInit();
-    refreshSessions();
+    refreshSessions().then((_) {
+      if (sessions.isNotEmpty && currentSession.value == null) {
+        selectSession(sessions.first);
+      }
+    });
   }
 
   /// Refreshes the list of previous chat sessions.
@@ -32,7 +36,6 @@ class ChatController extends GetxController {
         final list = await _service.listSessions(user.uid);
         sessions.assignAll(list);
         
-        // Update current session object if it exists in the list (to pick up the new title)
         if (currentSession.value != null) {
           final updated = sessions.firstWhereOrNull((s) => s.id == currentSession.value!.id);
           if (updated != null) {
@@ -50,7 +53,12 @@ class ChatController extends GetxController {
     final user = _auth.user;
     if (user != null) {
       messages.clear();
-      currentSession.value = await _service.createSession("New Chat", user.uid);
+      final sessionId = await _service.createOrGetSession(user.uid);
+      currentSession.value = ChatSession(
+        id: sessionId,
+        displayTitle: "New Chat",
+        lastUpdated: DateTime.now(),
+      );
       await refreshSessions();
     }
   }
@@ -61,7 +69,6 @@ class ChatController extends GetxController {
     messages.clear();
     final history = await _service.loadMessages(session.id);
     messages.assignAll(history);
-    Get.back(); // Close drawer if open
   }
 
   Future<void> sendMessage(String text) async {
@@ -70,20 +77,33 @@ class ChatController extends GetxController {
     final user = _auth.user;
     if (user == null) return;
 
+    final trimmedText = text.trim();
+    final isImageRequest = trimmedText.startsWith('/image ');
+
+    final historySnapshot = List<ChatMessage>.from(
+      messages.where((m) => !m.isLoading).toList(),
+    );
+
     // Auto-create session if none exists
     if (currentSession.value == null) {
-      currentSession.value = await _service.createSession("New Chat", user.uid);
+      final sessionId = await _service.createOrGetSession(user.uid);
+      currentSession.value = ChatSession(
+        id: sessionId,
+        displayTitle: "New Chat",
+        lastUpdated: DateTime.now(),
+      );
       await refreshSessions();
     }
 
     final userMsg = ChatMessage(
       id: _uuid.v4(),
-      content: text.trim(),
+      content: trimmedText,
       role: MessageRole.user,
       createdAt: DateTime.now(),
     );
 
     messages.add(userMsg);
+    _saveMessage(userMsg);
     isSending.value = true;
 
     try {
@@ -93,29 +113,64 @@ class ChatController extends GetxController {
         role: MessageRole.assistant,
         createdAt: DateTime.now(),
         isLoading: true,
+        type: isImageRequest ? MessageType.image : MessageType.text,
       );
       messages.add(assistantPlaceholder);
+      // Intentionally NOT saved to RTDB — loading states are ephemeral and will be regenerated on app restart.
 
-      final reply = await _service.sendMessage(
-        text.trim(),
-        history: messages.where((m) => !m.isLoading && m.id != userMsg.id).toList(),
-        sessionId: currentSession.value?.id,
-        userId: user.uid,
-      );
+      ChatMessage reply;
+
+      if (isImageRequest) {
+        final prompt = trimmedText.replaceFirst('/image ', '').trim();
+        if (prompt.isEmpty) {
+          throw Exception('Please provide a prompt for image generation.');
+        }
+
+        final imageUrl = await _service.generateImage(prompt);
+        reply = ChatMessage(
+          id: _uuid.v4(),
+          content: 'Generated image for: "$prompt"',
+          role: MessageRole.assistant,
+          createdAt: DateTime.now(),
+          type: MessageType.image,
+          imageUrl: imageUrl,
+        );
+
+        if (messages.length <= 3) {
+          unawaited(_service.updateSessionTitle(user.uid, currentSession.value!.id, prompt));
+        }
+      } else {
+        reply = await _service.sendMessage(
+          trimmedText,
+          history: historySnapshot,
+        );
+        if (messages.length <= 3) {
+          unawaited(_service.updateSessionTitle(user.uid, currentSession.value!.id, trimmedText));
+        }
+      }
       
       final index = messages.indexOf(assistantPlaceholder);
       if (index != -1) {
         messages[index] = reply;
+        _saveMessage(reply);
       }
 
-      // Refresh sessions to update title/timestamp in sidebar
       await refreshSessions();
-      
     } catch (e) {
       messages.removeWhere((m) => m.isLoading);
-      Get.snackbar('Error', 'Failed to get a response.');
+      final errorMessage = e.toString().contains('Exception:') 
+          ? e.toString().split('Exception:').last.trim() 
+          : 'Failed to get a response.';
+      Get.snackbar('Error', errorMessage);
     } finally {
       isSending.value = false;
+    }
+  }
+
+  void _saveMessage(ChatMessage message) {
+    final user = _auth.user;
+    if (user != null && currentSession.value != null) {
+      unawaited(_service.saveMessage(user.uid, currentSession.value!.id, message));
     }
   }
 
@@ -139,9 +194,5 @@ class ChatController extends GetxController {
       messages.clear();
       await refreshSessions();
     }
-  }
-
-  void clearChat() {
-    messages.clear();
   }
 }

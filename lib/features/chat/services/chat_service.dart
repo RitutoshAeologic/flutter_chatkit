@@ -10,7 +10,7 @@ class ChatService {
   final _uuid = const Uuid();
 
   ChatService._internal() {
-    print("🔥 Switching to Realtime Database Flow");
+    print("🔥 ChatService Initialized");
   }
 
   static final ChatService _instance = ChatService._internal();
@@ -21,22 +21,29 @@ class ChatService {
   static const String _groqUrl = 'https://api.groq.com/openai/v1/chat/completions';
   static const String _groqModel = 'llama-3.3-70b-versatile';
 
-  /// Sends a message and saves to Realtime Database.
-  Future<ChatMessage> sendMessage(String text, {List<ChatMessage>? history, String? sessionId, String? userId}) async {
+  /// Sends a message directly to Groq.
+  Future<ChatMessage> sendMessage(String text, {List<ChatMessage>? history}) async {
     try {
-      final List<Map<String, String>> requestMessages = [
-        {'role': 'system', 'content': 'You are ChatKit AI, a premium and helpful assistant.'},
+      if (_groqApiKey.isEmpty || _groqApiKey.startsWith("YOUR")) {
+        return _getStubResponse("Please provide your Groq API Key in `chat_service.dart` to enable real responses.");
+      }
+
+      final List<Map<String, String>> messages = [
+        {'role': 'system', 'content': 'You are ChatKit AI, a premium and helpful assistant. Keep responses helpful and formatted with markdown.'},
       ];
 
+      // Add history if available
       if (history != null) {
         for (var msg in history.take(10)) {
-          requestMessages.add({
-            'role': msg.role == MessageRole.user ? 'user' : 'assistant',
-            'content': msg.content,
+          messages.add({
+            "role": msg.role == MessageRole.user ? "user" : "assistant",
+            "content": msg.content
           });
         }
       }
-      requestMessages.add({'role': 'user', 'content': text});
+
+      // Add current message
+      messages.add({"role": "user", "content": text});
 
       final response = await http.post(
         Uri.parse(_groqUrl),
@@ -45,99 +52,143 @@ class ChatService {
           'Content-Type': 'application/json',
         },
         body: jsonEncode({
-          'model': _groqModel,
-          'messages': requestMessages,
-          'max_tokens': 1024,
-          'temperature': 0.7,
-        }),
-      );
-
-      if (response.statusCode != 200) {
-        throw Exception('Groq API Error: ${response.body}');
-      }
-
-      final data = jsonDecode(response.body);
-      final String aiResponse = data['choices'][0]['message']['content'];
-
-      final assistantMessage = ChatMessage(
-        id: _uuid.v4(),
-        content: aiResponse,
-        role: MessageRole.assistant,
-        createdAt: DateTime.now(),
-      );
-
-      // Save to RTDB
-      if (sessionId != null && userId != null) {
-        await _saveToRTDB(userId, sessionId, text, aiResponse);
-      }
-
-      return assistantMessage;
-    } catch (e) {
-      return ChatMessage(
-        id: _uuid.v4(),
-        content: "Error: $e",
-        role: MessageRole.assistant,
-        createdAt: DateTime.now(),
-      );
-    }
-  }
-
-  /// Generates a short title for the chat based on the conversation context.
-  Future<String> _generateSmartTitle(String userMsg, String aiMsg) async {
-    try {
-      final response = await http.post(
-        Uri.parse(_groqUrl),
-        headers: {
-          'Authorization': 'Bearer $_groqApiKey',
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode({
-          'model': _groqModel,
-          'messages': [
-            {'role': 'system', 'content': 'Summarize the following user request into a 3-5 word catchy title. Return ONLY the title text.'},
-            {'role': 'user', 'content': userMsg},
-          ],
-          'max_tokens': 15,
-          'temperature': 0.5,
+          "model": _groqModel,
+          "messages": messages,
+          "max_tokens": 1024,
+          "temperature": 0.7,
         }),
       );
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        String title = data['choices'][0]['message']['content'];
-        title = title.replaceAll('"', '').trim();
-        return title.isNotEmpty ? title : (userMsg.length > 30 ? "${userMsg.substring(0, 30)}..." : userMsg);
+        final content = data['choices'][0]['message']['content'];
+        
+        return ChatMessage(
+          id: _uuid.v4(),
+          content: content,
+          role: MessageRole.assistant,
+          createdAt: DateTime.now(),
+        );
+      } else {
+        return _getStubResponse("Groq API Error: ${response.statusCode}");
       }
     } catch (e) {
-      print("Title generation failed: $e");
+      return _getStubResponse("Connection Error: $e");
     }
-    return userMsg.length > 30 ? "${userMsg.substring(0, 30)}..." : userMsg;
   }
 
-  /// Creates a session in Realtime Database.
-  Future<ChatSession> createSession(String title, String userId) async {
+  /// Generates an image using Pollinations.ai with enhanced parameters.
+  Future<String> generateImage(String prompt) async {
     try {
-      final sessionRef = _db.ref('users/$userId/chat_sessions').push();
-      final sessionId = sessionRef.key!;
-      
-      await sessionRef.set({
-        'title': title,
-        'createdAt': ServerValue.timestamp,
-        'updatedAt': ServerValue.timestamp,
-      });
+      final encodedPrompt = Uri.encodeComponent(prompt);
+      final seed = DateTime.now().millisecondsSinceEpoch;
+      final imageUrl = "https://image.pollinations.ai/prompt/$encodedPrompt?width=1024&height=1024&nologo=true&seed=$seed";
 
-      return ChatSession(
-        id: sessionId,
-        displayTitle: title,
-        lastUpdated: DateTime.now(),
-      );
+      // Safety delay to allow the API to acknowledge the request
+      await Future.delayed(const Duration(milliseconds: 1000));
+
+      return imageUrl;
     } catch (e) {
-      print("RTDB Create Session Error: $e");
-      return ChatSession(id: _uuid.v4(), displayTitle: 'Untitled', lastUpdated: DateTime.now());
+      print("Image generation failed: $e");
+      throw Exception('Failed to generate image. Please try again.');
     }
   }
 
-  /// Lists all chat sessions for a user.
+  /// Creates or gets a session in Realtime Database.
+  Future<String> createOrGetSession(String userId, {String? currentSessionId}) async {
+    if (currentSessionId != null && currentSessionId.isNotEmpty) {
+      return currentSessionId;
+    }
+
+    final sessionId = _uuid.v4();
+    final sessionRef = _db.ref('users/$userId/chat_sessions/$sessionId');
+
+    await sessionRef.set({
+      'sessionId': sessionId,
+      'title': 'New Chat',
+      'createdAt': DateTime.now().toIso8601String(),
+      'updatedAt': DateTime.now().toIso8601String(),
+    });
+
+    return sessionId;
+  }
+
+  /// Saves a message to Realtime Database.
+  Future<void> saveMessage(String userId, String sessionId, ChatMessage message) async {
+    try {
+      final messageRef = _db.ref('chat_messages/$sessionId/${message.id}');
+      await messageRef.set(message.toJson());
+
+      // Update session timestamp
+      await _db.ref('users/$userId/chat_sessions/$sessionId').update({
+        'updatedAt': DateTime.now().toIso8601String(),
+      });
+    } catch (e) {
+      print("RTDB Save Error: $e");
+    }
+  }
+
+  /// Loads messages for a specific session.
+  Future<List<ChatMessage>> loadMessages(String sessionId) async {
+    try {
+      final snapshot = await _db.ref('chat_messages/$sessionId').get();
+      if (!snapshot.exists) return [];
+
+      final data = Map<String, dynamic>.from(snapshot.value as Map);
+      final list = data.values.map((v) => ChatMessage.fromJson(Map<String, dynamic>.from(v as Map))).toList();
+      
+      list.sort((a, b) => a.createdAt.compareTo(b.createdAt));
+      return list;
+    } catch (e) {
+      print("RTDB Load Messages Error: $e");
+      return [];
+    }
+  }
+
+  /// Generates a smart title for the session
+  Future<void> updateSessionTitle(String userId, String sessionId, String content) async {
+    if (_groqApiKey.isEmpty || _groqApiKey.startsWith("YOUR")) return;
+    try {
+      if (content.isEmpty) return;
+
+      final response = await http.post(
+        Uri.parse(_groqUrl),
+        headers: {
+          'Authorization': 'Bearer $_groqApiKey',
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode({
+          "model": _groqModel,
+          "messages": [
+            {"role": "system", "content": "Summarize the user request into a 3-5 word title. Return ONLY the title text."},
+            {"role": "user", "content": content}
+          ],
+          "max_tokens": 15,
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final title = data['choices'][0]['message']['content'].toString().replaceAll('"', '').trim();
+        if (title.isNotEmpty) {
+          await _db.ref('users/$userId/chat_sessions/$sessionId').update({'title': title});
+        }
+      }
+    } catch (e) {
+      print("Title update failed: $e");
+    }
+  }
+
+  ChatMessage _getStubResponse(String text) {
+    return ChatMessage(
+      id: _uuid.v4(),
+      content: text,
+      role: MessageRole.assistant,
+      createdAt: DateTime.now(),
+    );
+  }
+
+  /// Lists all previous sessions for a user.
   Future<List<ChatSession>> listSessions(String userId) async {
     try {
       final snapshot = await _db.ref('users/$userId/chat_sessions').get();
@@ -146,12 +197,20 @@ class ChatService {
       final data = Map<String, dynamic>.from(snapshot.value as Map);
       return data.entries.map((e) {
         final val = Map<String, dynamic>.from(e.value as Map);
+        
+        DateTime updatedAt;
+        if (val['updatedAt'] is int) {
+          updatedAt = DateTime.fromMillisecondsSinceEpoch(val['updatedAt']);
+        } else if (val['updatedAt'] is String) {
+          updatedAt = DateTime.tryParse(val['updatedAt']) ?? DateTime.now();
+        } else {
+          updatedAt = DateTime.now();
+        }
+
         return ChatSession(
           id: e.key,
-          displayTitle: (val['title'] == null || val['title'] == '') 
-              ? 'Untitled' 
-              : val['title'],
-          lastUpdated: DateTime.fromMillisecondsSinceEpoch(val['updatedAt'] ?? 0),
+          displayTitle: val['title'] ?? 'Untitled',
+          lastUpdated: updatedAt,
         );
       }).toList()..sort((a, b) => b.lastUpdated.compareTo(a.lastUpdated));
     } catch (e) {
@@ -160,81 +219,14 @@ class ChatService {
     }
   }
 
-  /// Loads all messages for a specific session.
-  Future<List<ChatMessage>> loadMessages(String sessionId) async {
-    try {
-      final snapshot = await _db.ref('chat_messages/$sessionId').get();
-      if (!snapshot.exists) return [];
-
-      final data = Map<String, dynamic>.from(snapshot.value as Map);
-      return data.entries.map((e) {
-        final val = Map<String, dynamic>.from(e.value as Map);
-        return ChatMessage(
-          id: e.key,
-          content: val['content'] ?? '',
-          role: val['role'] == 'user' ? MessageRole.user : MessageRole.assistant,
-          createdAt: DateTime.fromMillisecondsSinceEpoch(val['createdAt'] ?? 0),
-        );
-      }).toList()..sort((a, b) => a.createdAt.compareTo(b.createdAt));
-    } catch (e) {
-      print("RTDB Load Messages Error: $e");
-      return [];
-    }
+  /// Deletes a specific session.
+  Future<void> deleteSession(String userId, String id) async {
+    await _db.ref('users/$userId/chat_sessions/$id').remove();
+    await _db.ref('chat_messages/$id').remove();
   }
 
-  /// Saves user and bot messages to Realtime Database.
-  Future<void> _saveToRTDB(String userId, String sessionId, String userMsg, String aiMsg) async {
-    try {
-      final messagesRef = _db.ref('chat_messages/$sessionId');
-      
-      // Push User Message
-      await messagesRef.push().set({
-        'role': 'user',
-        'content': userMsg,
-        'createdAt': ServerValue.timestamp,
-      });
-
-      // Push AI Message
-      await messagesRef.push().set({
-        'role': 'assistant',
-        'content': aiMsg,
-        'createdAt': ServerValue.timestamp,
-      });
-
-      // Update session timestamp and potentially the title if it's the first message
-      final sessionRef = _db.ref('users/$userId/chat_sessions/$sessionId');
-      final sessionSnap = await sessionRef.get();
-      
-      Map<String, dynamic> updates = {
-        'updatedAt': ServerValue.timestamp,
-      };
-
-      if (sessionSnap.exists) {
-        final sessionData = Map<String, dynamic>.from(sessionSnap.value as Map);
-        final currentTitle = sessionData['title'] ?? '';
-        
-        // If it's a new chat, generate a smart title based on the chat content
-        if (currentTitle == 'New Chat' || currentTitle == '' || currentTitle == 'Untitled') {
-          updates['title'] = await _generateSmartTitle(userMsg, aiMsg);
-        }
-      } else {
-        updates['title'] = await _generateSmartTitle(userMsg, aiMsg);
-      }
-
-      await sessionRef.update(updates);
-      print("✅ Chat saved and smart title updated!");
-    } catch (e) {
-      print("❌ RTDB Maintenance Error: $e");
-    }
-  }
-
-  Future<void> deleteSession(String userId, String sessionId) async {
-    await _db.ref('users/$userId/chat_sessions/$sessionId').remove();
-    await _db.ref('chat_messages/$sessionId').remove();
-  }
-
+  /// Clears walkthrough/history for a user.
   Future<void> clearAllHistory(String userId) async {
-    // 1. Get all session IDs to delete messages
     final snapshot = await _db.ref('users/$userId/chat_sessions').get();
     if (snapshot.exists) {
       final data = Map<String, dynamic>.from(snapshot.value as Map);
@@ -242,7 +234,6 @@ class ChatService {
         await _db.ref('chat_messages/$id').remove();
       }
     }
-    // 2. Clear all sessions
     await _db.ref('users/$userId/chat_sessions').remove();
   }
 }
