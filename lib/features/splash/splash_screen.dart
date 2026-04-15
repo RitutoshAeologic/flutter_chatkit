@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../../core/routes/app_routes.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -54,26 +55,19 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Scaffold(
+      backgroundColor: theme.colorScheme.surface,
       body: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            AnimatedBuilder(
-              animation: _controller,
-              builder: (context, child) {
-                return Opacity(
-                  opacity: _fadeAnimation.value,
-                  child: Transform.scale(
-                    scale: _scaleAnimation.value,
-                    child: child,
-                  ),
-                );
-              },
-              child: CustomPaint(
-                size: const Size(100, 100),
-                painter: ChatKitLogoPainter(color: theme.colorScheme.primary),
-              ),
-            ),
+            Icon(
+              Icons.auto_awesome,
+              size: 80,
+              color: theme.colorScheme.primary,
+            )
+            .animate(onPlay: (controller) => controller.repeat())
+            .shimmer(duration: const Duration(seconds: 2), color: theme.colorScheme.primaryContainer)
+            .scale(duration: const Duration(seconds: 1), curve: Curves.elasticOut),
             const SizedBox(height: 24),
             Text(
               'ChatKit AI',
@@ -81,15 +75,15 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
                 fontWeight: FontWeight.bold,
                 color: theme.colorScheme.primary,
               ),
-            ),
+            ).animate().fadeIn(delay: const Duration(milliseconds: 400)).slideY(begin: 0.2),
             const SizedBox(height: 8),
             Text(
               'Your intelligent companion',
               style: theme.textTheme.bodyMedium?.copyWith(
                 color: theme.colorScheme.outline,
               ),
-            ),
-            const SizedBox(height: 48),
+            ).animate().fadeIn(delay: const Duration(milliseconds: 600)),
+            const SizedBox(height: 64),
             const CircularProgressIndicator(strokeWidth: 2),
           ],
         ),

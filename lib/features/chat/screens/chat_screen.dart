@@ -191,6 +191,7 @@ class ChatScreen extends GetView<ChatController> {
               ),
               textAlign: TextAlign.center,
             ),
+            _buildEmptyStateTip(theme),
             const SizedBox(height: 32),
             _buildQuickPrompt(theme, "Write a creative story about space."),
             _buildQuickPrompt(theme, "Explain Quantum Physics to a 5-year-old."),
@@ -198,6 +199,34 @@ class ChatScreen extends GetView<ChatController> {
             _buildQuickPrompt(theme, "/image a futuristic city under the ocean"),
           ],
         ).animate().fadeIn(duration: 800.ms).scale(begin: const Offset(0.9, 0.9)),
+      ),
+    );
+  }
+
+  Widget _buildEmptyStateTip(ThemeData theme) {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(40, 24, 40, 0),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.primary.withOpacity(0.05),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: theme.colorScheme.primary.withOpacity(0.1)),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.auto_fix_high, color: theme.colorScheme.primary, size: 20),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              'Pro Tip: type "/image" followed by a prompt to generate stunning AI images!',
+              style: TextStyle(
+                fontSize: 13,
+                color: theme.colorScheme.primary,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

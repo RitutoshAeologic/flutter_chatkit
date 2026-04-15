@@ -84,9 +84,6 @@ class ChatService {
       final seed = DateTime.now().millisecondsSinceEpoch;
       final imageUrl = "https://image.pollinations.ai/prompt/$encodedPrompt?width=1024&height=1024&nologo=true&seed=$seed";
 
-      // Safety delay to allow the API to acknowledge the request
-      await Future.delayed(const Duration(milliseconds: 1000));
-
       return imageUrl;
     } catch (e) {
       print("Image generation failed: $e");

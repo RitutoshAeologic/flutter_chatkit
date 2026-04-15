@@ -26,9 +26,10 @@ class _AuthScreenState extends State<AuthScreen> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              CustomPaint(
-                size: const Size(80, 80),
-                painter: ChatKitLogoPainter(color: theme.colorScheme.primary),
+              Icon(
+                Icons.auto_awesome,
+                size: 80,
+                color: theme.colorScheme.primary,
               ),
               const SizedBox(height: 24),
               Text(
