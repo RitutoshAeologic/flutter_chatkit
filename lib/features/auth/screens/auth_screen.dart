@@ -41,7 +41,7 @@ class _AuthScreenState extends State<AuthScreen> {
               ),
               const SizedBox(height: 8),
               Text(
-                'Sign in to continue',
+                'Sign-in/Sign-up to continue',
                 style: theme.textTheme.bodyMedium?.copyWith(
                   color: theme.colorScheme.outline,
                 ),
@@ -106,32 +106,32 @@ class _AuthScreenState extends State<AuthScreen> {
                     )),
               ),
               const SizedBox(height: 48),
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: theme.colorScheme.surfaceContainerHighest.withAlpha(50),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: theme.colorScheme.outlineVariant),
-                ),
-                child: Column(
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.info_outline, size: 16, color: theme.colorScheme.primary),
-                        const SizedBox(width: 8),
-                        const Text('Developer Info', style: TextStyle(fontWeight: FontWeight.bold)),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    const Text(
-                      'User must be created manually in Firebase Console before signing in.',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(fontSize: 12),
-                    ),
-                  ],
-                ),
-              ),
+              // Container(
+              //   padding: const EdgeInsets.all(16),
+              //   decoration: BoxDecoration(
+              //     color: theme.colorScheme.surfaceContainerHighest.withAlpha(50),
+              //     borderRadius: BorderRadius.circular(12),
+              //     border: Border.all(color: theme.colorScheme.outlineVariant),
+              //   ),
+              //   child: Column(
+              //     children: [
+              //       Row(
+              //         mainAxisAlignment: MainAxisAlignment.center,
+              //         children: [
+              //           Icon(Icons.info_outline, size: 16, color: theme.colorScheme.primary),
+              //           const SizedBox(width: 8),
+              //           const Text('Developer Info', style: TextStyle(fontWeight: FontWeight.bold)),
+              //         ],
+              //       ),
+              //       const SizedBox(height: 8),
+              //       // const Text(
+              //       //   'User must be created manually in Firebase Console before signing in.',
+              //       //   textAlign: TextAlign.center,
+              //       //   style: TextStyle(fontSize: 12),
+              //       // ),
+              //     ],
+              //   ),
+              // ),
             ],
           ),
         ),
