@@ -5,6 +5,7 @@ import '../models/message.dart';
 import '../models/chat_session.dart';
 import '../services/chat_service.dart';
 import '../../auth/controllers/auth_controller.dart';
+import 'package:flutter/material.dart';
 
 class ChatController extends GetxController {
   final ChatService _service = Get.find<ChatService>();
@@ -13,54 +14,105 @@ class ChatController extends GetxController {
 
   final messages = <ChatMessage>[].obs;
   final sessions = <ChatSession>[].obs;
+
   final isSending = false.obs;
   final isLoadingSessions = false.obs;
   final currentSession = Rxn<ChatSession>();
 
+  /// UI Controllers
+  final scrollController = ScrollController();
+  final messageController = TextEditingController();
+  final messageFocusNode = FocusNode();
+
   @override
   void onInit() {
     super.onInit();
+
     refreshSessions().then((_) {
       if (sessions.isNotEmpty && currentSession.value == null) {
         selectSession(sessions.first);
       }
     });
+
+    /// auto-scroll whenever messages update
+    ever(messages, (_) => scrollToBottom());
   }
 
-  /// Refreshes the list of previous chat sessions.
+  @override
+  void onClose() {
+    scrollController.dispose();
+    messageController.dispose();
+    messageFocusNode.dispose();
+    super.onClose();
+  }
+
+  void dismissKeyboard() {
+    messageFocusNode.unfocus();
+    FocusManager.instance.primaryFocus?.unfocus();
+  }
+
+  void scrollToBottom() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!scrollController.hasClients) return;
+
+      scrollController.animateTo(
+        scrollController.position.maxScrollExtent,
+        duration: const Duration(milliseconds: 280),
+        curve: Curves.easeOut,
+      );
+    });
+  }
+
+  Future<void> sendCurrentMessage() async {
+    final text = messageController.text.trim();
+
+    if (text.isEmpty || isSending.value) return;
+
+    messageController.clear();
+    dismissKeyboard();
+
+    await sendMessage(text);
+  }
+
   Future<void> refreshSessions() async {
     final user = _auth.user;
-    if (user != null) {
-      isLoadingSessions.value = true;
-      try {
-        final list = await _service.listSessions(user.uid);
-        sessions.assignAll(list);
-        
-        if (currentSession.value != null) {
-          final updated = sessions.firstWhereOrNull((s) => s.id == currentSession.value!.id);
-          if (updated != null) {
-            currentSession.value = updated;
-          }
+    if (user == null) return;
+
+    isLoadingSessions.value = true;
+
+    try {
+      final list = await _service.listSessions(user.uid);
+      sessions.assignAll(list);
+
+      if (currentSession.value != null) {
+        final updated = sessions.firstWhereOrNull(
+              (e) => e.id == currentSession.value!.id,
+        );
+
+        if (updated != null) {
+          currentSession.value = updated;
         }
-      } finally {
-        isLoadingSessions.value = false;
       }
+    } finally {
+      isLoadingSessions.value = false;
     }
   }
 
-  /// Starts a completely new chat session.
   Future<void> startNewChat() async {
     final user = _auth.user;
-    if (user != null) {
-      messages.clear();
-      final sessionId = await _service.createOrGetSession(user.uid);
-      currentSession.value = ChatSession(
-        id: sessionId,
-        displayTitle: "New Chat",
-        lastUpdated: DateTime.now(),
-      );
-      await refreshSessions();
-    }
+    if (user == null) return;
+
+    messages.clear();
+
+    final sessionId = await _service.createOrGetSession(user.uid);
+
+    currentSession.value = ChatSession(
+      id: sessionId,
+      displayTitle: "New Chat",
+      lastUpdated: DateTime.now(),
+    );
+
+    await refreshSessions();
   }
 
   /// Selects and loads an existing chat session.
@@ -81,17 +133,18 @@ class ChatController extends GetxController {
     final isImageRequest = trimmedText.startsWith('/image ');
 
     final historySnapshot = List<ChatMessage>.from(
-      messages.where((m) => !m.isLoading).toList(),
+      messages.where((m) => !m.isLoading),
     );
 
-    // Auto-create session if none exists
     if (currentSession.value == null) {
       final sessionId = await _service.createOrGetSession(user.uid);
+
       currentSession.value = ChatSession(
         id: sessionId,
         displayTitle: "New Chat",
         lastUpdated: DateTime.now(),
       );
+
       await refreshSessions();
     }
 
@@ -104,10 +157,11 @@ class ChatController extends GetxController {
 
     messages.add(userMsg);
     _saveMessage(userMsg);
+
     isSending.value = true;
 
     try {
-      final assistantPlaceholder = ChatMessage(
+      final loadingMsg = ChatMessage(
         id: 'loading-${_uuid.v4()}',
         content: '',
         role: MessageRole.assistant,
@@ -115,41 +169,33 @@ class ChatController extends GetxController {
         isLoading: true,
         type: isImageRequest ? MessageType.image : MessageType.text,
       );
-      messages.add(assistantPlaceholder);
-      // Intentionally NOT saved to RTDB — loading states are ephemeral and will be regenerated on app restart.
+
+      messages.add(loadingMsg);
 
       ChatMessage reply;
 
       if (isImageRequest) {
         final prompt = trimmedText.replaceFirst('/image ', '').trim();
-        if (prompt.isEmpty) {
-          throw Exception('Please provide a prompt for image generation.');
-        }
 
         final imageUrl = await _service.generateImage(prompt);
+
         reply = ChatMessage(
           id: _uuid.v4(),
-          content: 'Generated image for: "$prompt"',
+          content: 'Generated image for "$prompt"',
           role: MessageRole.assistant,
           createdAt: DateTime.now(),
           type: MessageType.image,
           imageUrl: imageUrl,
         );
-
-        if (messages.length <= 3) {
-          unawaited(_service.updateSessionTitle(user.uid, currentSession.value!.id, prompt));
-        }
       } else {
         reply = await _service.sendMessage(
           trimmedText,
           history: historySnapshot,
         );
-        if (messages.length <= 3) {
-          unawaited(_service.updateSessionTitle(user.uid, currentSession.value!.id, trimmedText));
-        }
       }
-      
-      final index = messages.indexOf(assistantPlaceholder);
+
+      final index = messages.indexWhere((e) => e.id == loadingMsg.id);
+
       if (index != -1) {
         messages[index] = reply;
         _saveMessage(reply);
@@ -158,10 +204,7 @@ class ChatController extends GetxController {
       await refreshSessions();
     } catch (e) {
       messages.removeWhere((m) => m.isLoading);
-      final errorMessage = e.toString().contains('Exception:') 
-          ? e.toString().split('Exception:').last.trim() 
-          : 'Failed to get a response.';
-      Get.snackbar('Error', errorMessage);
+      Get.snackbar("Error", "Failed to send message");
     } finally {
       isSending.value = false;
     }
@@ -169,6 +212,7 @@ class ChatController extends GetxController {
 
   void _saveMessage(ChatMessage message) {
     final user = _auth.user;
+
     if (user != null && currentSession.value != null) {
       unawaited(_service.saveMessage(user.uid, currentSession.value!.id, message));
     }

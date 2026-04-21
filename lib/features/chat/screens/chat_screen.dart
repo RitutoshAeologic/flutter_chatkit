@@ -14,58 +14,64 @@ class ChatScreen extends GetView<ChatController> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final textController = TextEditingController();
+  //  final textController = TextEditingController();
     final inputText = "".obs;
 
-    return Scaffold(
-      drawer: _buildHistoryDrawer(context, theme),
-      appBar: AppBar(
-        centerTitle: true,
-        title: Obx(() => Text(
-          controller.currentSession.value?.displayTitle ?? 'ChatKit AI',
-          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
-        )),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.add_circle_outline),
-            tooltip: 'New Chat',
-            onPressed: () => controller.startNewChat(),
-          ),
-          PopupMenuButton(
-            icon: const Icon(Icons.more_vert),
-            itemBuilder: (context) => [
-              const PopupMenuItem(value: 'new', child: Text('New session')),
-              const PopupMenuItem(value: 'logout', child: Text('Sign out')),
-            ],
-            onSelected: (value) {
-              if (value == 'new') controller.startNewChat();
-              if (value == 'logout') Get.find<AuthController>().signOut();
-            },
-          ),
-        ],
-      ),
-      body: Column(
-        children: [
-          Expanded(
-            child: Obx(() {
-              if (controller.messages.isEmpty) {
-                return _buildEmptyState(theme);
-              }
-              return ListView.builder(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
-                itemCount: controller.messages.length,
-                itemBuilder: (context, index) {
-                  final message = controller.messages[index];
-                  if (message.type == MessageType.image) {
-                    return ImageMessageBubble(message: message);
-                  }
-                  return _buildMessageBubble(message, theme);
-                },
-              );
-            }),
-          ),
-          _buildInputBar(theme, textController, inputText),
-        ],
+    return GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onTap: controller.dismissKeyboard, // tap anywhere close keyboard
+        child: Scaffold(
+          resizeToAvoidBottomInset: true,
+        drawer: _buildHistoryDrawer(context, theme),
+        appBar: AppBar(
+          centerTitle: true,
+          title: Obx(() => Text(
+            controller.currentSession.value?.displayTitle ?? 'ChatKit AI',
+            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+          )),
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.add_circle_outline),
+              tooltip: 'New Chat',
+              onPressed: () => controller.startNewChat(),
+            ),
+            PopupMenuButton(
+              icon: const Icon(Icons.more_vert),
+              itemBuilder: (context) => [
+                const PopupMenuItem(value: 'new', child: Text('New session')),
+                const PopupMenuItem(value: 'logout', child: Text('Sign out')),
+              ],
+              onSelected: (value) {
+                if (value == 'new') controller.startNewChat();
+                if (value == 'logout') Get.find<AuthController>().signOut();
+              },
+            ),
+          ],
+        ),
+        body: Column(
+          children: [
+            Expanded(
+              child: Obx(() {
+                if (controller.messages.isEmpty) {
+                  return _buildEmptyState(theme);
+                }
+                return ListView.builder(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+                  itemCount: controller.messages.length,
+                  controller: controller.scrollController,
+                  itemBuilder: (context, index) {
+                    final message = controller.messages[index];
+                    if (message.type == MessageType.image) {
+                      return ImageMessageBubble(message: message);
+                    }
+                    return _buildMessageBubble(message, theme);
+                  },
+                );
+              }),
+            ),
+            _buildInputBar(theme,controller.messageController, inputText),
+          ],
+        ),
       ),
     );
   }
@@ -346,7 +352,7 @@ class ChatScreen extends GetView<ChatController> {
                 borderRadius: BorderRadius.circular(28),
               ),
               child: TextField(
-                controller: textController,
+                controller: controller.messageController,
                 onChanged: (val) => inputText.value = val,
                 decoration: InputDecoration(
                   hintText: 'Ask me anything...',

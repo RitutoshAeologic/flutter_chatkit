@@ -19,8 +19,11 @@ class AuthController extends GetxController {
       );
       Get.offAllNamed(AppRoutes.chat);
     } on FirebaseAuthException catch (e) {
+      print(e.message);
       errorMessage.value = e.message;
     } catch (e) {
+      print(e.toString());
+
       errorMessage.value = "An unexpected error occurred.";
     } finally {
       isLoading.value = false;
