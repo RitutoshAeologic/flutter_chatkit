@@ -3,6 +3,7 @@ import 'package:get/get.dart';
 
 import 'core/asset_ingestion_service.dart';
 import 'core/embedding_service.dart';
+import 'core/network_service.dart';
 import 'core/routes/app_routes.dart';
 import 'data/document_chunk.dart';
 import 'data/object_box_store.dart';
@@ -23,7 +24,10 @@ void main() async {
       'chunks: ${store.box<DocumentChunk>().count()}, '
       'docs: ${store.box<SourceDocument>().count()}');
 
-  // ── 2. EmbeddingService (Jina — ingestion only) ───────────────────────────
+  // ── 2. NetworkService (connectivity monitoring) ───────────────────────────
+  Get.put<NetworkService>(NetworkService(), permanent: true);
+
+  // ── 3. EmbeddingService (Jina — ingestion only) ───────────────────────────
   final embedder = EmbeddingService();
   Get.put<EmbeddingService>(embedder, permanent: true);
 
@@ -39,7 +43,7 @@ void main() async {
   );
   Get.put<AssetIngestionService>(assetIngestion, permanent: true);
 
-  // ── 5. Decide initial route ───────────────────────────────────────────────
+  // ── 6. Decide initial route ───────────────────────────────────────────────
   // First install (or reinstall): show ingestion screen to index bundled PDFs.
   // Subsequent launches: skip straight to chat (ObjectBox already populated).
   final initialRoute = assetIngestion.isAlreadyIngested

@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show SocketException;
 
 import 'package:flutter/foundation.dart';
 import 'package:get/get.dart';
@@ -6,6 +8,7 @@ import 'package:http/http.dart' as http;
 import 'package:uuid/uuid.dart';
 
 import '../../../core/app_config.dart';
+import '../../../core/network_service.dart';
 import '../../../core/routes/app_routes.dart';
 import '../../../data/rag_models.dart';
 import '../../../domain/rag_retrieval_service.dart';
@@ -113,14 +116,30 @@ class ChatController extends GetxController {
         createdAt: DateTime.now(),
       ));
     } catch (e) {
-      messages.removeWhere((m) => m.id == placeholderId);
-      messages.add(ChatMessage(
+      // Classify the error so users see a meaningful message, not a stack dump
+      final errType = NetworkService.classify(e);
+      final userMsg = switch (errType) {
+        NetworkErrorType.noInternet =>
+          '📵 No internet connection.\n\nYour question needs to be embedded via '
+          'Jina AI first. Please check your connection and try again.',
+        NetworkErrorType.timeout =>
+          '⏱ The server took too long to respond. Please try again.',
+        NetworkErrorType.authError =>
+          '🔑 API key error. Contact the app developer.',
+        NetworkErrorType.rateLimited =>
+          '⏳ Too many requests. Please wait a moment and try again.',
+        NetworkErrorType.serverError =>
+          '🌐 The AI server is temporarily down. Please try again later.',
+        NetworkErrorType.unknown =>
+          '⚠️ Something went wrong. Please try again.'
+      };
+      _replaceLoading(placeholderId, ChatMessage(
         id: _uuid.v4(),
-        content: '⚠️ Error: $e',
+        content: userMsg,
         role: MessageRole.assistant,
         createdAt: DateTime.now(),
       ));
-      debugPrint('ChatController.sendMessage error: $e');
+      debugPrint('ChatController.sendMessage error (${errType.name}): $e');
     } finally {
       isSending.value = false;
     }
@@ -162,11 +181,12 @@ class ChatController extends GetxController {
   Future<String> _callGroqGrounded(
       String query, RagRetrievalResult result) async {
     if (AppConfig.groqApiKey.isEmpty) {
-      throw Exception(
-          'GROQ_API_KEY not set. Pass via --dart-define=GROQ_API_KEY=gsk_...');
+      // No Groq key — fall back to extractive answer gracefully
+      debugPrint('ChatController: GROQ_API_KEY not set → falling back to extractive');
+      return _formatExtractiveAnswer(result);
     }
 
-    final contextBlock = result.contextBlock; // already formatted with source labels
+    final contextBlock = result.contextBlock;
     final userMessage = '''
 === DOCUMENT EXCERPTS (your ONLY allowed source) ===
 
@@ -181,28 +201,44 @@ $query
 Remember: if the answer is not in the excerpts, say exactly "I couldn't find this information in the loaded documents."
 ''';
 
-    final messages = [
+    final groqMessages = [
       {'role': 'system', 'content': AppConfig.groqSystemPrompt},
-      {
-        'role': 'user',
-        'content': userMessage,
-      },
+      {'role': 'user', 'content': userMessage},
     ];
 
-    final response = await http.post(
-      Uri.parse(AppConfig.chatUrl),
-      headers: {
-        'Authorization': 'Bearer ${AppConfig.groqApiKey}',
-        'Content-Type': 'application/json',
-      },
-      body: jsonEncode({
-        'model': AppConfig.chatModel,
-        'messages': messages,
-        'max_tokens': 512,
-        'temperature': 0.1, // low temp = more faithful to context
-      }),
-    );
+    final http.Response response;
+    try {
+      response = await http
+          .post(
+            Uri.parse(AppConfig.chatUrl),
+            headers: {
+              'Authorization': 'Bearer ${AppConfig.groqApiKey}',
+              'Content-Type': 'application/json',
+            },
+            body: jsonEncode({
+              'model': AppConfig.chatModel,
+              'messages': groqMessages,
+              'max_tokens': 512,
+              'temperature': 0.1,
+            }),
+          )
+          .timeout(
+            const Duration(seconds: 20),
+            onTimeout: () => throw TimeoutException(
+                'Groq timed out', const Duration(seconds: 20)),
+          );
+    } on SocketException {
+      throw Exception(NetworkService.messageFor(NetworkErrorType.noInternet));
+    } on TimeoutException {
+      throw Exception(NetworkService.messageFor(NetworkErrorType.timeout));
+    }
 
+    if (response.statusCode == 401 || response.statusCode == 403) {
+      throw Exception(NetworkService.messageFor(NetworkErrorType.authError));
+    }
+    if (response.statusCode == 429) {
+      throw Exception(NetworkService.messageFor(NetworkErrorType.rateLimited));
+    }
     if (response.statusCode != 200) {
       throw Exception(
           'Groq API ${response.statusCode}: ${response.body}');
