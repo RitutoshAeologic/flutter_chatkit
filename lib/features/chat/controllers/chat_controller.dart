@@ -1,14 +1,25 @@
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import 'package:get/get.dart';
+import 'package:http/http.dart' as http;
 import 'package:uuid/uuid.dart';
 
+import '../../../core/app_config.dart';
 import '../../../core/routes/app_routes.dart';
 import '../../../data/rag_models.dart';
 import '../../../domain/rag_retrieval_service.dart';
 import '../models/message.dart';
 
 /// Offline extractive-RAG chat controller.
-/// No Groq, no Firebase. All answers come directly from ObjectBox chunk search.
+///
+/// Query flow:
+///   1. Embed query via Jina (cached)
+///   2. Dot-product search over ObjectBox chunks
+///   3a. [AppConfig.useGroqForResponse = false] → format extracted chunks as answer
+///   3b. [AppConfig.useGroqForResponse = true]  → Groq formats the chunks into prose
+///       but is strictly grounded (no external knowledge allowed via system prompt)
+///   4. If no chunks found → hard "not found" reply. Groq is NEVER used as fallback.
 class ChatController extends GetxController {
   final RagRetrievalService _retrieval = Get.find<RagRetrievalService>();
   final _uuid = const Uuid();
@@ -17,36 +28,31 @@ class ChatController extends GetxController {
   final messages  = <ChatMessage>[].obs;
   final isSending = false.obs;
 
-  /// Citations map: message.id → list of citations (used by ChatScreen UI).
   final _citationsMap = <String, List<RagCitation>>{};
-
-  // ── Public getters ─────────────────────────────────────────────────────────
-  List<RagCitation>? citationsFor(String messageId) => _citationsMap[messageId];
+  List<RagCitation>? citationsFor(String id) => _citationsMap[id];
 
   void clearChat() {
     messages.clear();
     _citationsMap.clear();
   }
 
-  void goToKbManager() => Get.toNamed(AppRoutes.kbManager);
+  void goToKbViewer() => Get.toNamed(AppRoutes.kbViewer);
 
-  // ── Core send logic ────────────────────────────────────────────────────────
+  // ── Send ───────────────────────────────────────────────────────────────────
 
   Future<void> sendMessage(String text) async {
     final query = text.trim();
     if (query.isEmpty || isSending.value) return;
 
-    // 1. Add user message
-    final userMsg = ChatMessage(
+    isSending.value = true;
+
+    messages.add(ChatMessage(
       id: _uuid.v4(),
       content: query,
       role: MessageRole.user,
       createdAt: DateTime.now(),
-    );
-    messages.add(userMsg);
-    isSending.value = true;
+    ));
 
-    // 2. Loading placeholder
     final placeholderId = 'loading-${_uuid.v4()}';
     messages.add(ChatMessage(
       id: placeholderId,
@@ -57,71 +63,160 @@ class ChatController extends GetxController {
     ));
 
     try {
-      // 3. Retrieve relevant chunks (offline dot-product over ObjectBox)
+      // ── 1. Retrieve from ObjectBox (fully offline) ─────────────────────
       final sw = Stopwatch()..start();
       final result = await _retrieval.retrieve(query);
       sw.stop();
-      debugPrint('ChatController: retrieve() = ${sw.elapsedMilliseconds}ms '
+      debugPrint('ChatController: retrieve = ${sw.elapsedMilliseconds}ms '
           '(hasContext: ${result.hasContext})');
 
-      // 4. Format extractive answer
-      final String answerText;
+      // ── 2. No chunks found → hard cutoff, no Groq fallback ────────────
       if (!result.hasContext) {
-        answerText = '❌ No relevant information found in your uploaded documents.\n\n'
-            'Try uploading a PDF or text file related to your question using the **📚** button.';
-      } else {
-        final buf = StringBuffer();
-        buf.writeln(
-            '✅ Found **${result.citations.length}** relevant passage${result.citations.length > 1 ? 's' : ''} in your documents:\n');
-        for (final c in result.citations) {
-          buf.writeln('**[${c.index}] 📄 ${c.sourceLabel}** *(score: ${(c.score * 100).toStringAsFixed(1)}%)*');
-          buf.writeln();
-          // Find the full chunk text for this citation
-          final idx = result.citations.indexOf(c);
-          final blocks = result.contextBlock.split('\n\n');
-          if (idx < blocks.length) {
-            // Strip the "[N] label\n" header line added by retrieval service
-            final lines = blocks[idx].split('\n');
-            final chunkBody = lines.length > 1 ? lines.sublist(1).join('\n') : lines.first;
-            buf.writeln('> $chunkBody');
-          }
-          buf.writeln();
-        }
-        answerText = buf.toString().trimRight();
+        _replaceLoading(placeholderId, ChatMessage(
+          id: _uuid.v4(),
+          content:
+              '❌ No relevant information found in the loaded documents.\n\n'
+              'The knowledge base does not contain an answer to this question.',
+          role: MessageRole.assistant,
+          createdAt: DateTime.now(),
+        ));
+        return;
       }
+
+      // ── 3a. Extractive answer (default, fully offline) ─────────────────
+      if (!AppConfig.useGroqForResponse) {
+        final replyId = _uuid.v4();
+        _citationsMap[replyId] = result.citations;
+        _replaceLoading(placeholderId, ChatMessage(
+          id: replyId,
+          content: _formatExtractiveAnswer(result),
+          role: MessageRole.assistant,
+          createdAt: DateTime.now(),
+        ));
+        return;
+      }
+
+      // ── 3b. Groq formatter — grounded strictly to retrieved chunks ─────
+      final groqSw = Stopwatch()..start();
+      final groqAnswer = await _callGroqGrounded(query, result);
+      groqSw.stop();
+      debugPrint('ChatController: Groq call = ${groqSw.elapsedMilliseconds}ms');
 
       final replyId = _uuid.v4();
-      final reply = ChatMessage(
+      _citationsMap[replyId] = result.citations;
+      _replaceLoading(placeholderId, ChatMessage(
         id: replyId,
-        content: answerText,
+        content: groqAnswer,
         role: MessageRole.assistant,
         createdAt: DateTime.now(),
-      );
-
-      // Store citations for the citations row widget
-      if (result.hasContext) {
-        _citationsMap[replyId] = result.citations;
-      }
-
-      // 5. Replace placeholder with actual answer
-      final idx = messages.indexWhere((m) => m.id == placeholderId);
-      if (idx != -1) {
-        messages[idx] = reply;
-      } else {
-        messages.add(reply);
-      }
+      ));
     } catch (e) {
       messages.removeWhere((m) => m.id == placeholderId);
-      final errMsg = ChatMessage(
+      messages.add(ChatMessage(
         id: _uuid.v4(),
-        content: '⚠️ Error retrieving answer: $e',
+        content: '⚠️ Error: $e',
         role: MessageRole.assistant,
         createdAt: DateTime.now(),
-      );
-      messages.add(errMsg);
+      ));
       debugPrint('ChatController.sendMessage error: $e');
     } finally {
       isSending.value = false;
     }
+  }
+
+  // ── Helpers ────────────────────────────────────────────────────────────────
+
+  void _replaceLoading(String placeholderId, ChatMessage reply) {
+    final idx = messages.indexWhere((m) => m.id == placeholderId);
+    if (idx != -1) {
+      messages[idx] = reply;
+    } else {
+      messages.add(reply);
+    }
+  }
+
+  String _formatExtractiveAnswer(RagRetrievalResult result) {
+    final buf = StringBuffer();
+    buf.writeln(
+        '✅ Found **${result.citations.length}** relevant passage${result.citations.length > 1 ? 's' : ''}:\n');
+    for (final c in result.citations) {
+      buf.writeln('**[${c.index}] 📄 ${c.sourceLabel}**');
+      buf.writeln();
+      // Extract the chunk body from the context block
+      final blocks = result.contextBlock.split('\n\n');
+      if (c.index - 1 < blocks.length) {
+        final lines = blocks[c.index - 1].split('\n');
+        final body =
+            lines.length > 1 ? lines.sublist(1).join('\n') : lines.first;
+        buf.writeln('> $body');
+      }
+      buf.writeln();
+    }
+    return buf.toString().trimRight();
+  }
+
+  /// Calls Groq with retrieved chunks as the ONLY context source.
+  /// The system prompt forbids Groq from using external knowledge.
+  Future<String> _callGroqGrounded(
+      String query, RagRetrievalResult result) async {
+    if (AppConfig.groqApiKey.isEmpty) {
+      throw Exception(
+          'GROQ_API_KEY not set. Pass via --dart-define=GROQ_API_KEY=gsk_...');
+    }
+
+    final contextBlock = result.contextBlock; // already formatted with source labels
+    final userMessage = '''
+=== DOCUMENT EXCERPTS (your ONLY allowed source) ===
+
+$contextBlock
+
+=== END OF EXCERPTS ===
+
+Using ONLY the excerpts above (do not use any outside knowledge), please answer this question in a clear, friendly, and concise way:
+
+$query
+
+Remember: if the answer is not in the excerpts, say exactly "I couldn't find this information in the loaded documents."
+''';
+
+    final messages = [
+      {'role': 'system', 'content': AppConfig.groqSystemPrompt},
+      {
+        'role': 'user',
+        'content': userMessage,
+      },
+    ];
+
+    final response = await http.post(
+      Uri.parse(AppConfig.chatUrl),
+      headers: {
+        'Authorization': 'Bearer ${AppConfig.groqApiKey}',
+        'Content-Type': 'application/json',
+      },
+      body: jsonEncode({
+        'model': AppConfig.chatModel,
+        'messages': messages,
+        'max_tokens': 512,
+        'temperature': 0.1, // low temp = more faithful to context
+      }),
+    );
+
+    if (response.statusCode != 200) {
+      throw Exception(
+          'Groq API ${response.statusCode}: ${response.body}');
+    }
+
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    final content =
+        (data['choices'] as List).first['message']['content'] as String;
+
+    final usage = data['usage'] as Map<String, dynamic>?;
+    if (usage != null) {
+      debugPrint('ChatController: Groq tokens → '
+          'prompt=${usage['prompt_tokens']} '
+          'completion=${usage['completion_tokens']}');
+    }
+
+    return content.trim();
   }
 }

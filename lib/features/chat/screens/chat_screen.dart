@@ -28,7 +28,7 @@ class ChatScreen extends GetView<ChatController> {
           IconButton(
             icon: const Icon(Icons.library_books_rounded),
             tooltip: 'Knowledge Base',
-            onPressed: () => Get.toNamed(AppRoutes.kbManager),
+            onPressed: () => Get.toNamed(AppRoutes.kbViewer),
           ),
           IconButton(
             icon: const Icon(Icons.delete_outline),
@@ -167,7 +167,7 @@ class _EmptyState extends StatelessWidget {
             ),
             const SizedBox(height: 32),
             FilledButton.icon(
-              onPressed: () => Get.toNamed(AppRoutes.kbManager),
+              onPressed: () => Get.toNamed(AppRoutes.kbViewer),
               icon: const Icon(Icons.upload_file),
               label: const Text('Upload Documents'),
               style: FilledButton.styleFrom(

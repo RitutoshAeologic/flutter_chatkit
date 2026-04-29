@@ -1,13 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import 'app.dart';
+
+import 'core/asset_ingestion_service.dart';
 import 'core/embedding_service.dart';
+import 'core/routes/app_routes.dart';
 import 'data/document_chunk.dart';
 import 'data/object_box_store.dart';
 import 'data/source_document.dart';
-import 'domain/document_ingestion_service.dart';
 import 'domain/rag_retrieval_service.dart';
 import 'objectbox.g.dart';
+import 'app.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -17,28 +19,32 @@ void main() async {
   final obx = ObjectBoxStore(store);
   Get.put<ObjectBoxStore>(obx, permanent: true);
 
-  assert(() {
-    debugPrint('OBX ready — '
-        'chunks: ${store.box<DocumentChunk>().count()}, '
-        'docs: ${store.box<SourceDocument>().count()}');
-    return true;
-  }());
+  debugPrint('OBX ready — '
+      'chunks: ${store.box<DocumentChunk>().count()}, '
+      'docs: ${store.box<SourceDocument>().count()}');
 
-  // ── 2. EmbeddingService (Jina AI — called only during ingestion) ──────────
+  // ── 2. EmbeddingService (Jina — ingestion only) ───────────────────────────
   final embedder = EmbeddingService();
   Get.put<EmbeddingService>(embedder, permanent: true);
 
-  // ── 3. RagRetrievalService (fully offline vector search) ──────────────────
+  // ── 3. RagRetrievalService (100% offline vector search) ───────────────────
   final retrieval = RagRetrievalService(obx: obx, embedder: embedder);
   Get.put<RagRetrievalService>(retrieval, permanent: true);
 
-  // ── 4. DocumentIngestionService ───────────────────────────────────────────
-  final ingestion = DocumentIngestionService(
+  // ── 4. AssetIngestionService ──────────────────────────────────────────────
+  final assetIngestion = AssetIngestionService(
     obx: obx,
     embedder: embedder,
     retrieval: retrieval,
   );
-  Get.put<DocumentIngestionService>(ingestion, permanent: true);
+  Get.put<AssetIngestionService>(assetIngestion, permanent: true);
 
-  runApp(const ChatKitApp());
+  // ── 5. Decide initial route ───────────────────────────────────────────────
+  // First install (or reinstall): show ingestion screen to index bundled PDFs.
+  // Subsequent launches: skip straight to chat (ObjectBox already populated).
+  final initialRoute = assetIngestion.isAlreadyIngested
+      ? AppRoutes.chat
+      : AppRoutes.ingestion;
+
+  runApp(ChatKitApp(initialRoute: initialRoute));
 }

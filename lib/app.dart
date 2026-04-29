@@ -5,7 +5,8 @@ import 'core/routes/app_routes.dart';
 import 'core/theme/app_theme.dart';
 
 class ChatKitApp extends StatelessWidget {
-  const ChatKitApp({super.key});
+  final String initialRoute;
+  const ChatKitApp({super.key, required this.initialRoute});
 
   @override
   Widget build(BuildContext context) {
@@ -16,7 +17,7 @@ class ChatKitApp extends StatelessWidget {
       darkTheme: AppTheme.dark,
       themeMode: ThemeMode.system,
       initialBinding: AppBinding(),
-      initialRoute: AppRoutes.chat, // straight to chat — no auth
+      initialRoute: initialRoute,
       getPages: AppRoutes.pages,
     );
   }

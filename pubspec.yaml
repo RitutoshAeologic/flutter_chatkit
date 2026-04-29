@@ -1,5 +1,5 @@
 name: flutter_chatkit
-description: "Offline document Q&A — extracts answers from locally stored document embeddings."
+description: "Offline document Q&A — answers extracted from bundled PDF knowledge base."
 publish_to: 'none'
 version: 1.0.0+1
 
@@ -13,22 +13,21 @@ dependencies:
 
   # State Management & Navigation
   get: ^4.6.6
-  http: ^1.2.2           # Jina AI embed API (ingestion only)
-  uuid: ^4.5.1           # message ID generation
+  http: ^1.2.2           # Jina embed API (ingestion) + optional Groq formatter
+  uuid: ^4.5.1
 
-  # UI Components
+  # UI
   flutter_animate: ^4.5.0
   google_fonts: ^6.2.1
-  intl: ^0.19.0          # date formatting in KbManagerScreen
+  intl: ^0.19.0
 
   # ObjectBox — offline vector storage & search
   objectbox: ^5.3.1
   objectbox_flutter_libs: ^5.3.1
 
-  # Document ingestion
-  file_picker: ^8.1.2
-  syncfusion_flutter_pdf: ^27.2.4  # text-based PDF extraction
-  crypto: ^3.0.3                   # SHA-256 dedup
+  # Document ingestion (bundled assets only — no file_picker needed)
+  syncfusion_flutter_pdf: ^27.2.4
+  crypto: ^3.0.3
 
 dev_dependencies:
   flutter_test:
@@ -39,3 +38,12 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+
+  # ── Bundled PDF knowledge base ─────────────────────────────────────────────
+  # Add your PDFs to assets/pdfs/ and list them below.
+  # They will be indexed on first install and searched offline.
+  assets:
+    - assets/pdfs/
+    # Add individual files here when you have PDFs:
+    # - assets/pdfs/product_manual.pdf
+    # - assets/pdfs/faq.pdf
