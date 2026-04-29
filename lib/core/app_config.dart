@@ -6,7 +6,7 @@ class AppConfig {
   // ── Jina AI — embedding only (called during ingestion, NOT during chat) ───
   static const String jinaApiKey = String.fromEnvironment(
     'JINA_API_KEY',
-    defaultValue: '',
+    defaultValue: 'jina_ec89226c13254adf834fe581502ad6e6CXia9f6ZFPgVeprjrAySnnInvuZo',
   );
   static const String embedUrl   = 'https://api.jina.ai/v1/embeddings';
   static const String embedModel = 'jina-embeddings-v2-base-en'; // 768-dim
@@ -19,7 +19,7 @@ class AppConfig {
 
   static const String groqApiKey = String.fromEnvironment(
     'GROQ_API_KEY',
-    defaultValue: '',
+    defaultValue: '', // inject via: --dart-define=GROQ_API_KEY=gsk_...
   );
   static const String chatUrl   = 'https://api.groq.com/openai/v1/chat/completions';
   static const String chatModel = 'llama-3.1-8b-instant';
@@ -41,8 +41,8 @@ class AppConfig {
       'Begin every response by citing which excerpt(s) you are drawing from.';
 
   // ── RAG retrieval tuning ──────────────────────────────────────────────────
-  static const double similarityThreshold = 0.35;
-  static const int    topKChunks          = 3;
+  static const double similarityThreshold = 0.25; // lowered 0.35→0.25: wider net for short queries
+  static const int    topKChunks          = 5;     // increased 3→5: more context for Groq
   static const int    embeddingDimensions = 768;
 
   // ── Asset ingestion ───────────────────────────────────────────────────────

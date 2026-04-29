@@ -97,6 +97,8 @@ class ChatController extends GetxController {
       }
 
       // ── 3b. Groq formatter — grounded strictly to retrieved chunks ─────
+      debugPrint('ChatController: sending ${result.citations.length} chunks to Groq');
+      debugPrint('ChatController: contextBlock=\n${result.contextBlock}');
       final groqSw = Stopwatch()..start();
       final groqAnswer = await _callGroqGrounded(query, result);
       groqSw.stop();

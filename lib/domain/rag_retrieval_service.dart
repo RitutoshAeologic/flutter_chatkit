@@ -74,18 +74,10 @@ class RagRetrievalService {
       return const RagRetrievalResult.empty();
     }
 
-    // Sort descending by score
+    // Sort descending by score, take top-K (NO dedup by sourceLabel —
+    // multiple chunks from same document are all valuable context)
     scored.sort((a, b) => b.score.compareTo(a.score));
-
-    // Dedup by sourceLabel, take top-K
-    final seen = <String>{};
-    final topChunks = <({DocumentChunk chunk, double score})>[];
-    for (final item in scored) {
-      if (seen.add(item.chunk.sourceLabel)) {
-        topChunks.add(item);
-        if (topChunks.length >= AppConfig.topKChunks) break;
-      }
-    }
+    final topChunks = scored.take(AppConfig.topKChunks).toList();
 
     // Build context block
     final citations = <RagCitation>[];
@@ -93,16 +85,19 @@ class RagRetrievalService {
     for (int i = 0; i < topChunks.length; i++) {
       final item = topChunks[i];
       final idx = i + 1;
+      final preview = item.chunk.text.length > 120
+          ? '${item.chunk.text.substring(0, 120)}…'
+          : item.chunk.text;
       contextLines.add('[$idx] ${item.chunk.sourceLabel}\n${item.chunk.text}');
       citations.add(RagCitation(
         index: idx,
         sourceLabel: item.chunk.sourceLabel,
         score: item.score,
-        preview: item.chunk.text.length > 90
-            ? '${item.chunk.text.substring(0, 90)}…'
-            : item.chunk.text,
+        preview: preview,
       ));
-      debugPrint('RagRetrievalService: [${idx}] "${item.chunk.sourceLabel}" score=${item.score.toStringAsFixed(3)}');
+      debugPrint('RagRetrievalService: [$idx] "${item.chunk.sourceLabel}" '
+          'score=${item.score.toStringAsFixed(3)} '
+          'text_preview="${item.chunk.text.substring(0, item.chunk.text.length.clamp(0, 80))}"');
     }
 
     totalSw.stop();

@@ -32,18 +32,34 @@ class AssetChunkData {
 // ── Top-level isolate fn ─────────────────────────────────────────────────────
 
 List<AssetChunkData> extractAndChunkPdf(AssetIsolateInput input) {
-  String fullText;
   final document = PdfDocument(inputBytes: input.bytes);
-  final buffer = StringBuffer();
+  final pageBuffer = StringBuffer();
+
   for (int i = 0; i < document.pages.count; i++) {
-    final text = PdfTextExtractor(document)
+    final raw = PdfTextExtractor(document)
         .extractText(startPageIndex: i, endPageIndex: i);
-    if (text.trim().isNotEmpty) {
-      buffer.write('[[PAGE ${i + 1}]] $text ');
-    }
+    if (raw.trim().isEmpty) continue;
+
+    // ── Fix: SyncFusion sometimes strips spaces between words ────────────
+    // Insert space before uppercase letters following lowercase/digits,
+    // before digits following letters, and normalize whitespace.
+    final fixed = raw
+        .replaceAllMapped(
+            RegExp(r'([a-z])([A-Z])'), (m) => '${m[1]} ${m[2]}')
+        .replaceAllMapped(
+            RegExp(r'([A-Za-z])(\d)'), (m) => '${m[1]} ${m[2]}')
+        .replaceAllMapped(
+            RegExp(r'(\d)([A-Za-z])'), (m) => '${m[1]} ${m[2]}')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+
+    pageBuffer.write('[[PAGE ${i + 1}]] $fixed ');
   }
   document.dispose();
-  fullText = buffer.toString();
+
+  final fullText = pageBuffer.toString();
+  debugPrint(
+      'extractAndChunkPdf: "${input.fileName}" raw chars=${fullText.length}');
 
   final words = fullText.split(RegExp(r'\s+'));
   int currentPage = 1;
@@ -63,7 +79,7 @@ List<AssetChunkData> extractAndChunkPdf(AssetIsolateInput input) {
       final pageMatch = RegExp(r'\[\[PAGE (\d+)\]\]').firstMatch(word);
       if (pageMatch != null) {
         currentPage = int.parse(pageMatch.group(1)!);
-      } else {
+      } else if (word.trim().isNotEmpty) {
         windowWords.add(word);
       }
       j++;
@@ -83,6 +99,8 @@ List<AssetChunkData> extractAndChunkPdf(AssetIsolateInput input) {
     i += AppConfig.chunkWordWindow - AppConfig.chunkWordOverlap;
     if (i <= 0) i = 1;
   }
+  debugPrint(
+      'extractAndChunkPdf: "${input.fileName}" → ${chunks.length} chunks');
   return chunks;
 }
 
@@ -276,5 +294,16 @@ class AssetIngestionService {
     } finally {
       q.close();
     }
+  }
+
+  /// Clears ALL chunks + source docs from ObjectBox then re-ingests all
+  /// bundled PDFs from scratch. Use when adding a new PDF or fixing extraction.
+  Stream<IngestionEvent> forceReingest() async* {
+    debugPrint('AssetIngestionService: force re-ingest — clearing ObjectBox…');
+    _obx.box<DocumentChunk>().removeAll();
+    _obx.box<SourceDocument>().removeAll();
+    _retrieval.invalidateCache();
+    yield IngestionProgress(message: 'Cleared old data, re-indexing…', fraction: 0.0);
+    yield* ingestAll();
   }
 }
