@@ -1,8 +1,8 @@
 # ChatKit AI — RAG Implementation Specification
 ### Version 2.0 — Final Reference for AI-Assisted Implementation
 
-**Stack:** Flutter ≥3.19 · Dart ≥3.3 · GetX · Grok AI (Groq API) · Pollinations AI · Firebase Auth + RTDB · ObjectBox 4.x  
-**Scope:** Adds RAG (document upload → embedding → retrieval → grounded chat) to an existing Flutter chat app.
+**Stack:** Flutter ≥3.19 · Dart ≥3.3 · GetX · Groq API (Chat) · Jina AI (Embeddings) · Firebase Auth + RTDB · ObjectBox 4.x  
+**Scope:** Adds offline-first RAG (bundled document ingestion → embedding → retrieval → grounded chat) to an existing Flutter chat app.
 
 ---
 
@@ -25,23 +25,61 @@
 
 ## Table of Contents
 
-1. [System Purpose & Boundaries](#1-system-purpose--boundaries)
-2. [Architecture Overview](#2-architecture-overview)
-3. [Complete Data Flows](#3-complete-data-flows)
-4. [File Registry](#4-file-registry)
-5. [State Machines](#5-state-machines)
-6. [Service Wiring — Exact Registration Order](#6-service-wiring--exact-registration-order)
-7. [Data Models — Exact Field Definitions](#7-data-models--exact-field-definitions)
-8. [Service Contracts — Methods, Parameters, Return Types](#8-service-contracts--methods-parameters-return-types)
-9. [Error Handling Contract](#9-error-handling-contract)
-10. [Optimisations — What, Why, Exactly How](#10-optimisations--what-why-exactly-how)
-11. [Known Mistakes & Exact Fixes](#11-known-mistakes--exact-fixes)
-12. [ObjectBox Schema](#12-objectbox-schema)
-13. [KbManagerScreen UI Specification](#13-kbmanagerscreen-ui-specification)
-14. [pubspec.yaml](#14-pubspecyaml)
-15. [Setup Checklist](#15-setup-checklist)
-16. [Chroma Migration Path](#16-chroma-migration-path)
-17. [What to Build — Prioritised Task List](#17-what-to-build--prioritised-task-list)
+1. [0. Crash Course for Fresh Developers](#0-crash-course-for-fresh-developers)
+2. [1. System Purpose & Boundaries](#1-system-purpose--boundaries)
+3. [2. Architecture Overview](#2-architecture-overview)
+4. [3. Complete Data Flows](#3-complete-data-flows)
+5. [4. File Registry](#4-file-registry)
+6. [5. State Machines](#5-state-machines)
+7. [6. Service Wiring — Exact Registration Order](#6-service-wiring--exact-registration-order)
+8. [7. Data Models — Exact Field Definitions](#7-data-models--exact-field-definitions)
+9. [8. Service Contracts — Methods, Parameters, Return Types](#8-service-contracts--methods-parameters-return-types)
+10. [9. Error Handling Contract](#9-error-handling-contract)
+11. [10. Optimisations — What, Why, Exactly How](#10-optimisations--what-why-exactly-how)
+12. [11. Known Mistakes & Exact Fixes](#11-known-mistakes--exact-fixes)
+13. [12. ObjectBox Schema](#12-objectbox-schema)
+14. [13. KbManagerScreen UI Specification](#13-kbmanagerscreen-ui-specification)
+15. [14. pubspec.yaml](#14-pubspecyaml)
+16. [15. Setup Checklist](#15-setup-checklist)
+17. [16. Chroma Migration Path](#16-chroma-migration-path)
+18. [17. What to Build — Prioritised Task List](#17-what-to-build--prioritised-task-list)
+
+---
+
+## 0. Crash Course for Fresh Developers: How This App Works
+
+Welcome to the project! If you are new to AI or RAG, read this section first. It explains the core concepts and exactly how this Flutter application works from end-to-end.
+
+### What is RAG? (Retrieval-Augmented Generation)
+Standard LLMs (like ChatGPT or Groq) have a fixed knowledge base from when they were trained. They don't know about *your* private company PDFs, recent banking rules, or custom documents. **RAG** solves this by injecting your documents directly into the prompt before the AI answers.
+
+Here is the basic concept of RAG:
+1. **Ingestion (Preparation):** You take a massive PDF, break it into tiny paragraphs (called "chunks"), and mathematically convert those chunks into arrays of floating-point numbers (called "embeddings" or "vectors"). You save these in a local database (ObjectBox).
+2. **Retrieval (Search):** When the user asks "What is the EMI policy?", you convert their question into a mathematical vector using the *same* embedding API. You then ask the database: "Find me the top 3 chunks whose vectors are mathematically closest (cosine similarity) to the user's question vector."
+3. **Generation (Answering):** You take the text from those top 3 matched chunks, paste them into a hidden "System Prompt," and send it to the LLM (Groq) along with the user's question. The LLM reads your provided text and formulates a human-friendly answer.
+
+### Step-by-Step: What happens when the app launches?
+This app is designed as an "offline-first, developer-bundled" RAG system. The user does not upload PDFs. The developer bundles PDFs in the `assets/pdfs/` folder.
+
+1. **Booting Up (`main.dart`):** The app starts up. It connects to Firebase (for auth/chat history) and ObjectBox (our local database).
+2. **Checking for New PDFs (`AssetIngestionService`):** The app scans the `assets/pdfs/` folder. It looks at the file names and checks ObjectBox to see if they have been processed yet. 
+3. **Processing (If new):** If the PDF hasn't been seen before, the app runs an isolated background thread. It extracts the raw text from the PDF, slices it into 150-word chunks, and sends those chunks to the **Jina AI API** to get their vector embeddings. It then saves everything into ObjectBox.
+4. **App Ready:** Once the initial indexing is done, the app enters a "Ready" state. All knowledge is safely stored on the user's phone.
+
+### Step-by-Step: What happens when the user asks a question?
+1. **User asks a question:** The user types "What is the penalty for late payment?" and hits send (`ChatController`).
+2. **Checking the Network:** The app instantly checks if the user is online using `NetworkService`. If offline, it shows a red banner and stops.
+3. **Retrieval (`RagRetrievalService`):** The app takes the user's question and sends it to the **Jina API** to get an embedding vector. This usually takes ~200ms. *Optimization: If the user asked this before, we use our fast L1/L2 cache and skip the API entirely.*
+4. **Local Vector Search:** The app compares the question's vector against the thousands of chunk vectors sitting in ObjectBox. It grabs the top 3 best matching paragraphs.
+5. **Prompt Building (`FactualHardeningService`):** The app constructs a hidden, strict prompt that looks like this:
+   > *"You are a helpful assistant. You must ONLY answer using the provided facts below. If the answer is not in the facts, say 'I could not find this information.' \n\nFACT 1: A late payment incurs a 5% penalty. \nFACT 2: Payments are due on the 1st of the month."*
+6. **LLM Generation (`InferenceRouter`):** The app sends this massive prompt + the user's chat history to **Groq (Llama 3.1 8b)**.
+7. **UI Update:** Groq streams/returns the answer: *"The penalty for a late payment is 5%."* The app displays the answer in the chat bubble and creates a small "Citation Chip" below it showing exactly which PDF page the answer came from!
+
+### Key Design Philosophies You Must Know
+* **No LLM Hallucinations:** We specifically instruct Groq to *never* use its own general knowledge. It is only a "formatting engine" that reads the ObjectBox search results and makes them sound nice.
+* **Speed is King:** Mobile networks are slow. Every architectural decision (like persistent HTTP clients, L1 memory caching, L2 disk caching, network pre-warming, and strict text truncation) is designed to keep the total response time under 2 seconds.
+* **Separation of Concerns:** `EmbeddingService` only talks to Jina. `InferenceRouter` only talks to Groq. `AssetIngestionService` only handles parsing PDFs. Do not mix them.
 
 ---
 
@@ -49,7 +87,9 @@
 
 ### What this system does
 
-Answers the user's questions using Grok AI, optionally grounded in documents the user has uploaded. When the user uploads a PDF or TXT file, it is chunked, embedded, and stored locally. When the user sends a chat message, the system retrieves the most relevant chunks and injects them into the Grok prompt as verified context.
+Answers the user's questions using Groq AI, strictly grounded in documents bundled by the developer. On first launch, the app auto-ingests bundled PDFs from `assets/pdfs/`, chunks them, embeds them via Jina AI, and stores them locally. When the user sends a chat message, the system retrieves the most relevant chunks and injects them into the Groq prompt as verified context.
+
+**Crucial constraint:** Users cannot upload their own documents. All knowledge is baked in at build time. General LLM knowledge is bypassed.
 
 ### Hard boundaries — what each store owns
 
@@ -57,16 +97,16 @@ Answers the user's questions using Grok AI, optionally grounded in documents the
 |---|---|---|
 | **Firebase RTDB** | Auth sessions, chat history, message timestamps | Documents, vectors, embeddings |
 | **ObjectBox (local)** | `DocumentChunk` entities, `SourceDocument` metadata | Chat messages, user accounts |
+| **SharedPreferences** | Persistent embedding cache (L2) | Chat history |
 
-These two stores are completely independent. No code reads from both in the same function.
+These stores are completely independent. No code reads from multiple in the same function.
 
-### Three isolated concerns
+### Two isolated concerns
 
 | Concern | Entry point | External API used |
 |---|---|---|
-| Text chat + RAG answers | `ChatController.sendMessage()` | Groq chat completions + Groq embeddings |
-| Image generation | `ChatController.sendMessage()` (detects `/image` prefix) | Pollinations AI (URL-only, no API key) |
-| Document management | `KbManagerController.uploadDocument()` | Groq embeddings only |
+| Text chat + RAG answers | `ChatController.sendMessage()` | Groq chat completions + Jina embeddings |
+| Bundled document parsing | `AssetIngestionService.forceReingest()` | Jina embeddings only |
 
 ---
 
@@ -79,16 +119,16 @@ These two stores are completely independent. No code reads from both in the same
                     │                     │
         ┌───────────▼──────────┐ ┌────────▼───────────┐
         │    CHAT MODULE       │ │  DOCUMENT MODULE    │
-        │  ChatScreen          │ │  KbManagerScreen    │
-        │  ChatController      │ │  KbManagerController│
+        │  ChatScreen          │ │  KbViewerScreen     │
+        │  ChatController      │ │  (Read-only)        │
         └───────────┬──────────┘ └────────┬────────────┘
                     │                     │
-           /image?  │                     │ FilePicker
-          ┌─────────┤                     ▼
-          │         │            DocumentIngestionService
-          ▼         │              │ compute() isolate
-    Pollinations    │              │ → extract + chunk
-    AI (URL)        │              │ EmbeddingService (Groq)
+                    │              assets/pdfs/ bundled files
+                    │                     │
+                    │            AssetIngestionService
+                    │              │ compute() isolate
+                    │              │ → extract + chunk
+                    │              │ EmbeddingService (Jina AI)
                     │              │ → embedBatch() batch=96
                     │              │ ObjectBox.putMany()
                     │              │ → invalidateCache()
@@ -102,8 +142,8 @@ These two stores are completely independent. No code reads from both in the same
    (embed + search)      (prompt builder, no I/O)
           │
           ▼
-       Grok AI
-   (llama-3.3-70b)
+       Groq AI
+   (llama-3.1-8b-instant)
           │
           ▼
    RouterResponse
@@ -134,8 +174,8 @@ Step  Who                         What
  9    InferenceRouter              Calls RagRetrievalService.retrieve(text)
 10    RagRetrievalService          Checks ready-document count — if 0, returns empty immediately
 11    RagRetrievalService          Checks _chunkCache — loads from ObjectBox only if null
-12    RagRetrievalService          Calls EmbeddingService.embed(text)        [~200ms, Groq API]
-13    EmbeddingService             Checks _queryCache — returns cached vector if hit
+12    RagRetrievalService          Calls EmbeddingService.embed(text)        [~200ms, Jina API]
+13    EmbeddingService             Checks 3-layer cache (L1 Memory, L2 Disk) — returns if hit
 14    RagRetrievalService          Dot-product scores all cached chunks       [~2ms CPU]
 15    RagRetrievalService          Filters score >= 0.35, dedup by sourceLabel, take top-3
 16    RagRetrievalService          Returns RagRetrievalResult(contextBlock, citations, hasContext)
@@ -162,7 +202,7 @@ Step 8: `_isRagCandidate` — passes if ≥3 words.
 Step 10: `SourceDocument.count(status: ready) == 0` → returns `RagRetrievalResult.empty()` **immediately**.  
 Steps 17–26: identical. System prompt is plain persona. No citations. No UI citations row shown.
 
-**Zero RAG overhead** — the Groq embedding API is never called.
+**Zero RAG overhead** — the Jina embedding API is never called.
 
 ---
 
@@ -185,66 +225,28 @@ InferenceRouter, RagRetrievalService, EmbeddingService — **none are called**.
 
 ---
 
-### Flow D — Document ingestion
+### Flow D — Bundled Asset Ingestion
 
 ```
 Step  Who                          What
 ────  ───────────────────────────   ──────────────────────────────────────────────
- 1    User                          Taps "Add Document" in KbManagerScreen
- 2    KbManagerController           Sets isIngesting=true, progress=0.0
- 3    DocumentIngestionService      FilePicker.pickFiles(pdf/txt, withData: mobile only)
- 4    DocumentIngestionService      Guards: file.bytes == null → IngestionError
- 5    DocumentIngestionService      Guards: bytes.length > 50MB → IngestionError (size limit)
- 6    DocumentIngestionService      SHA-256(bytes).substring(0,16) → documentId
- 7    DocumentIngestionService      ObjectBox: SourceDocument exists with this documentId?
-                                    → yes: IngestionError("already in knowledge base")
- 8    DocumentIngestionService      Creates SourceDocument(status: processing) → ObjectBox.put()
-                                    → yield IngestionProgress("Extracting…", 0.10)
- 9    DocumentIngestionService      compute(_extractAndChunkInIsolate, IsolateInput)
-                                    [Background isolate — UI never blocks]
-10    [Background isolate]          PDF: syncfusion extracts text per page + [[PAGE N]] markers
-                                    TXT: utf8.decode(bytes, allowMalformed: true)
-11    [Background isolate]          Sliding-window chunker: 150 words, 30-word overlap, max 800 chars
-                                    Strips [[PAGE N]] → tracks currentPage → sourceLabel = "file.pdf p.3"
-                                    Skips chunks with <30 characters
-                                    Returns List<ChunkData> to main isolate
-12    DocumentIngestionService      Guards: rawChunks.isEmpty → sets status:failed → IngestionError
-                                    → yield IngestionProgress("Embedding N chunks…", 0.35)
-13    DocumentIngestionService      EmbeddingService.embedBatch(all chunk texts at once)
-                                    [EmbeddingService handles 96-per-call batching internally]
-                                    → yield IngestionProgress("Saving…", 0.90)
-14    DocumentIngestionService      Guards: embeddings.length != chunks.length → IngestionError
-15    DocumentIngestionService      Builds List<DocumentChunk> with embeddingCsv
-16    DocumentIngestionService      ObjectBox.putMany(chunks) — single transaction
-17    DocumentIngestionService      SourceDocument.totalChunks = chunks.length, status = ready
-                                    ObjectBox.put(sourceDocument)
-18    DocumentIngestionService      Calls _retrieval.invalidateCache()
-                                    → yield IngestionProgress("Done!", 1.0)
-                                    → yield IngestionComplete(sourceDocument)
-19    KbManagerController           Refreshes document list, sets isIngesting=false
-20    KbManagerScreen               Shows snackbar: "file.pdf (47 chunks) added"
+ 1    App Launch                    AssetIngestionService initialized
+ 2    AssetIngestionService         Reads AssetManifest to find all PDFs in assets/pdfs/
+ 3    AssetIngestionService         Compares with ObjectBox SourceDocuments
+ 4    AssetIngestionService         If matches, skips. If new/changed, deletes old and auto-starts ingestion
+ 5    AssetIngestionService         Extracts text using syncfusion_flutter_pdf
+ 6    AssetIngestionService         Chunks text and strips UI markers
+ 7    AssetIngestionService         Calls EmbeddingService.embedBatch(chunks) via Jina
+ 8    AssetIngestionService         Saves to ObjectBox (SourceDocument + DocumentChunks)
+ 9    AssetIngestionService         Calls _retrieval.invalidateCache()
+10    KbViewerScreen                Updates UI from _IndexingState to document list
 ```
 
 ---
 
 ### Flow E — Document deletion
 
-```
-Step  Who                          What
-────  ───────────────────────────   ──────────────────────────────────────────────
- 1    User                          Taps delete icon on document tile
- 2    KbManagerScreen               Shows confirmation dialog
- 3    User                          Confirms
- 4    KbManagerController           Calls DocumentIngestionService.deleteDocument(documentId)
- 5    DocumentIngestionService      try/finally: ObjectBox query chunks by documentId
-                                    → removeMany(chunkIds)
-                                    → query.close()
- 6    DocumentIngestionService      try/finally: ObjectBox query SourceDocument by documentId
-                                    → removeMany(docIds)
-                                    → query.close()
- 7    DocumentIngestionService      Calls _retrieval.invalidateCache()
- 8    KbManagerController           Refreshes list → document disappears from UI
-```
+**REMOVED**: The app no longer supports deleting documents from the UI. Documents are strictly managed by the developer via the `assets/pdfs/` directory. Changing the bundled files and rebuilding the app automatically triggers a clean re-ingestion.
 
 ---
 
@@ -257,14 +259,14 @@ Step  Who                          What
 | Status | File | Single Responsibility | Depends On | Called By |
 |---|---|---|---|---|
 | 🔨 | `app_config.dart` | Single source of truth: API key (via `--dart-define`), model names, URLs, all tunable thresholds. Zero logic, only constants. | — | Every service that calls an API |
-| ✅♻️ | `embedding_service.dart` | Groq embedding API. `embed(text)` for single queries. `embedBatch(texts)` for ingestion. Internal batch size = 96. Sorts response by `index` field. L2-normalises every vector. Query-level LRU cache (max 100 entries). | `AppConfig`, `http` | `DocumentIngestionService`, `RagRetrievalService` |
+| ✅♻️ | `embedding_service.dart` | Jina embedding API. `embed(text)` for single queries. `embedBatch(texts)` for ingestion. L2-normalises every vector. 3-Layer Cache: L1 memory LRU, L2 SharedPreferences disk cache, L3 persistent `http.Client`. Includes `warmUp()` method. | `AppConfig`, `http`, `shared_preferences` | `AssetIngestionService`, `RagRetrievalService` |
 
 ### Data Layer — `lib/data/`
 
 | Status | File | Single Responsibility | Depends On | Called By |
 |---|---|---|---|---|
-| ✅♻️ | `document_chunk.dart` | ObjectBox entity. One text chunk + its 768-dim embedding (CSV). Cached embedding deserialization. | `objectbox` | `DocumentIngestionService`, `RagRetrievalService` |
-| ✅ | `source_document.dart` | ObjectBox entity. Document metadata + ingestion lifecycle status. | `objectbox` | `DocumentIngestionService`, `KbManagerController` |
+| ✅♻️ | `document_chunk.dart` | ObjectBox entity. One text chunk + its 768-dim embedding (CSV). Cached embedding deserialization. | `objectbox` | `AssetIngestionService`, `RagRetrievalService` |
+| ✅ | `source_document.dart` | ObjectBox entity. Document metadata + ingestion lifecycle status. | `objectbox` | `AssetIngestionService`, `KbViewerScreen` |
 | 🔨 | `object_box_store.dart` | Thin wrapper: holds `Store`, exposes `box<T>()`. Opened once in `main()`, injected everywhere. | `objectbox.g.dart` (generated) | All domain services |
 | 🔨 | `rag_models.dart` | Value objects only: `RagRetrievalResult`, `RagCitation`, `RouterResponse`, `IngestionEvent` sealed class + subclasses. No logic. | — | `RagRetrievalService`, `FactualHardeningService`, `InferenceRouter`, `KbManagerController` |
 | ✅ | `chat_message.dart` | `ChatMessage`, `ChatSession`, `MessageRole` enum, `MessageType` enum. **Do not modify.** | — | `ChatController`, `InferenceRouter` |
@@ -273,8 +275,8 @@ Step  Who                          What
 
 | Status | File | Single Responsibility | Depends On | Called By |
 |---|---|---|---|---|
-| ✅♻️ | `document_ingestion_service.dart` | Full ingestion pipeline. FilePicker → dedup → `compute()` isolate → `embedBatch()` → `putMany()`. Yields `IngestionEvent` stream. Calls `_retrieval.invalidateCache()` after write. | `EmbeddingService`, `ObjectBoxStore`, `RagRetrievalService` (for invalidation only), `syncfusion_flutter_pdf`, `file_picker`, `crypto` | `KbManagerController` |
-| ✅♻️ | `rag_retrieval_service.dart` | Vector search. Embeds query → uses `_chunkCache` (lazy-loaded, invalidated on write) → dot-product cosine → filter → dedup → top-3. Exposes `invalidateCache()`. | `EmbeddingService`, `ObjectBoxStore` | `InferenceRouter`, `DocumentIngestionService` (invalidation) |
+| ✅♻️ | `asset_ingestion_service.dart` | Auto-ingestion pipeline. Reads `assets/pdfs/`, extracts, chunks, embeds via `embedBatch()`, and stores in ObjectBox. Handles network failures gracefully. | `EmbeddingService`, `ObjectBoxStore`, `RagRetrievalService`, `syncfusion_flutter_pdf` | `main.dart` |
+| ✅♻️ | `rag_retrieval_service.dart` | Vector search. Embeds query → uses `_chunkCache` (lazy-loaded, invalidated on write) → dot-product cosine → filter → dedup → top-3. Exposes `invalidateCache()`. | `EmbeddingService`, `ObjectBoxStore` | `InferenceRouter`, `AssetIngestionService` (invalidation) |
 | ✅♻️ | `services/factual_hardening_service.dart` | Prompt builder only. No I/O, no network. `buildSystemPrompt(RagRetrievalResult)` → `String`. Imports `rag_models.dart` only. | `rag_models.dart` | `InferenceRouter` |
 | ✅♻️ | `services/inference_router.dart` | Orchestrates: `_isRagCandidate()` check → retrieval → hardening → Grok API call → `RouterResponse`. Also `generateTitle()`. Single owner of Grok chat URL + model. | `RagRetrievalService`, `FactualHardeningService`, `AppConfig`, `http` | `ChatController` |
 
@@ -282,10 +284,9 @@ Step  Who                          What
 
 | Status | File | Single Responsibility | Depends On | Called By |
 |---|---|---|---|---|
-| ✅♻️ | `chat_controller.dart` | GetX controller. Calls `InferenceRouter.query()`. Holds `_citationsMap`. Clears `_citationsMap` whenever `messages.clear()` is called. `/image` → Pollinations. Firebase session logic unchanged. | `InferenceRouter`, `AuthController`, `FirebaseDatabase` | `ChatScreen` |
-| 🔨 | `kb_manager_controller.dart` | GetX controller for document screen. `RxList<SourceDocument>`, `isIngesting`, `ingestionProgress`, `ingestionStatus`. Calls ingestion service, refreshes list. | `DocumentIngestionService` | `KbManagerScreen` |
-| ✅♻️ | `chat_screen.dart` | Adds: library icon badge (doc count), citations collapsible row below RAG messages. All other UI unchanged. | `ChatController` | App router |
-| 🔨 | `kb_manager_screen.dart` | Document list, upload button, delete with confirmation, progress bar. Full spec in Section 13. | `KbManagerController` | Drawer + App router |
+| ✅♻️ | `chat_controller.dart` | GetX controller. Calls `InferenceRouter.query()`. Holds `_citationsMap`. Updates UI state. Integrates `NetworkService` for connectivity monitoring. | `InferenceRouter`, `NetworkService` | `ChatScreen` |
+| ✅♻️ | `chat_screen.dart` | Adds: library icon badge, network banners (offline & slow response), auto-scrolling, keyboard dismiss. | `ChatController`, `NetworkService` | App router |
+| ✅♻️ | `kb_viewer_screen.dart` | Read-only document list showing bundled assets. Shows `_IndexingState` (spinner) while ingesting. | `AssetIngestionService` | Drawer + App router |
 
 ### Wiring — `lib/`
 
@@ -359,48 +360,39 @@ Copy this exactly into `main.dart`. The order is load-bearing — each service u
 ```dart
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
   // ── 1. ObjectBox ─────────────────────────────────────────────
-  // Must be first. Every domain service depends on it.
   final store = await openStore();
   final obx = ObjectBoxStore(store);
   Get.put<ObjectBoxStore>(obx, permanent: true);
 
-  // ── 2. EmbeddingService ──────────────────────────────────────
-  // No dependencies beyond AppConfig.
-  final embedder = EmbeddingService();
-  Get.put<EmbeddingService>(embedder, permanent: true);
+  // ── 2. NetworkService (connectivity monitoring) ──────────────
+  Get.put<NetworkService>(NetworkService(), permanent: true);
 
-  // ── 3. RagRetrievalService ───────────────────────────────────
-  // Needs ObjectBoxStore + EmbeddingService.
+  // ── 3. EmbeddingService (Jina — ingestion only) ──────────────
+  final embedder = EmbeddingService();
+  await embedder.init(); // loads disk cache
+  Get.put<EmbeddingService>(embedder, permanent: true);
+  unawaited(embedder.warmUp()); // pre-warm TCP/TLS connection
+
+  // ── 4. RagRetrievalService ───────────────────────────────────
   final retrieval = RagRetrievalService(obx: obx, embedder: embedder);
   Get.put<RagRetrievalService>(retrieval, permanent: true);
 
-  // ── 4. FactualHardeningService ───────────────────────────────
-  // Stateless, no dependencies. const constructor.
-  final hardening = const FactualHardeningService();
-  Get.put<FactualHardeningService>(hardening, permanent: true);
-
-  // ── 5. InferenceRouter ───────────────────────────────────────
-  // Needs RagRetrievalService + FactualHardeningService.
-  final router = InferenceRouter(retrieval: retrieval, hardening: hardening);
-  Get.put<InferenceRouter>(router, permanent: true);
-
-  // ── 6. DocumentIngestionService ──────────────────────────────
-  // Needs ObjectBoxStore + EmbeddingService + RagRetrievalService.
-  final ingestion = DocumentIngestionService(
+  // ── 5. AssetIngestionService ─────────────────────────────────
+  final assetIngestion = AssetIngestionService(
     obx: obx,
     embedder: embedder,
-    retrieval: retrieval, // for cache invalidation only
+    retrieval: retrieval,
   );
-  Get.put<DocumentIngestionService>(ingestion, permanent: true);
+  Get.put<AssetIngestionService>(assetIngestion, permanent: true);
 
-  // ── Controllers are LAZY — never pre-register them ──────────
-  // ChatController: registered in AppBinding via GetPage
-  // KbManagerController: registered in KbManagerBinding via GetPage
+  // ── 6. Decide initial route ──────────────────────────────────
+  final initialRoute = assetIngestion.isAlreadyIngested
+      ? AppRoutes.chat
+      : AppRoutes.ingestion;
 
-  runApp(const MyApp());
+  runApp(ChatKitApp(initialRoute: initialRoute));
 }
 ```
 
@@ -496,25 +488,27 @@ class IngestionError extends IngestionEvent {
 
 ```dart
 class AppConfig {
+  static const String jinaApiKey =
+      String.fromEnvironment('JINA_API_KEY', defaultValue: '');
   static const String groqApiKey =
       String.fromEnvironment('GROQ_API_KEY', defaultValue: '');
 
-  // Groq endpoints
+  // Endpoints
   static const String chatUrl =
       'https://api.groq.com/openai/v1/chat/completions';
   static const String embedUrl =
-      'https://api.groq.com/openai/v1/embeddings';
+      'https://api.jina.ai/v1/embeddings';
 
   // Model identifiers
-  static const String chatModel   = 'llama-3.3-70b-versatile';
-  static const String embedModel  = 'nomic-embed-text-v1.5';
+  static const String chatModel   = 'llama-3.1-8b-instant';
+  static const String embedModel  = 'jina-embeddings-v2-base-en';
 
   // RAG tuning constants — change here, affects entire system
-  static const double similarityThreshold = 0.35;
-  static const int    topKChunks          = 3;
-  static const int    maxContextChars     = 3200;
-  static const int    embeddingDimensions = 768;
-  static const int    maxFileSizeBytes    = 50 * 1024 * 1024; // 50 MB
+  static const double similarityThreshold  = 0.25;
+  static const int    topKChunks           = 3;
+  static const int    chunkContextMaxChars = 600;
+  static const int    embeddingDimensions  = 768;
+  static const int    maxFileSizeBytes     = 50 * 1024 * 1024; // 50 MB
 
   // Chunking constants
   static const int chunkWordWindow = 150;
@@ -522,13 +516,10 @@ class AppConfig {
   static const int chunkMaxChars   = 800;
   static const int chunkMinChars   = 30;
 
-  // History budget
-  static const int historyMaxChars = 6000; // ~1500 tokens
-
   // Embedding cache
-  static const int embedCacheMaxSize = 100;
+  static const int embedCacheMaxSize = 200;
 
-  // Groq limits
+  // Limits
   static const int embedBatchSize = 96;
   static const int embedMaxRetries = 3;
 }
@@ -588,21 +579,20 @@ class InferenceRouter {
 }
 ```
 
-### DocumentIngestionService
+### AssetIngestionService
 
 ```dart
-class DocumentIngestionService {
-  // Opens FilePicker, then runs full ingestion pipeline.
-  // Yields IngestionEvent stream. Completes when done or on error.
-  Stream<IngestionEvent> pickAndIngest();
+class AssetIngestionService {
+  // Checks AssetManifest, compares to ObjectBox, handles updates/deletions.
+  // Then auto-starts ingestion if needed.
+  // Yields IngestionEvent stream for the UI.
+  Stream<IngestionEvent> forceReingest();
 
-  // Returns all SourceDocuments sorted by createdAt descending.
-  List<SourceDocument> listDocuments();
+  // Returns all SourceDocuments in the system.
+  List<SourceDocument> listReadyDocuments();
 
-  // Removes all DocumentChunks + the SourceDocument for this id.
-  // Always closes ObjectBox queries in try/finally.
-  // Calls retrieval.invalidateCache() after deletion.
-  Future<void> deleteDocument(String documentId);
+  // Sync state.
+  bool get isAlreadyIngested;
 }
 ```
 
@@ -689,32 +679,55 @@ Future<RagRetrievalResult> retrieve(String query) async {
 
 ---
 
-### O2 — Embedding LRU cache
+### O2 — 3-Layer Embedding Cache
 
-**Problem:** Same query asked twice hits Groq twice (~200ms each).  
-**Fix:** In-memory LRU cache, max 100 entries.
+**Problem:** Same query asked twice hits Jina twice (~200ms each). App restart loses cache.  
+**Fix:** L1 in-memory LRU, L2 SharedPreferences disk cache.
 
 ```dart
 // EmbeddingService
-final _queryCache = LinkedHashMap<String, List<double>>();
+// L1: Memory
+final _memCache = <String, List<double>>{};
+// L2: Disk
+SharedPreferences? _prefs;
 
 Future<List<double>> embed(String text) async {
-  if (_queryCache.containsKey(text)) {
-    // Move to end (most recently used)
-    final v = _queryCache.remove(text)!;
-    _queryCache[text] = v;
+  if (_memCache.containsKey(text)) {
+    final v = _memCache.remove(text)!;
+    _memCache[text] = v; // Move to front
     return v;
   }
   final result = (await _callApi([text])).first;
-  if (_queryCache.length >= AppConfig.embedCacheMaxSize) {
-    _queryCache.remove(_queryCache.keys.first); // evict least recently used
-  }
-  _queryCache[text] = result;
+  _memCache[text] = result;
+  _saveDiskCache();
   return result;
 }
 ```
 
-**Note:** Use `LinkedHashMap` (insertion-ordered) not `HashMap`. This makes `keys.first` the oldest entry — correct LRU eviction.
+---
+
+### O2b — Persistent HTTP Client
+
+**Problem:** Mobile networks pay a huge penalty (3-5s) for DNS + TCP + TLS handshake on the first request of a session.  
+**Fix:** Use a single persistent `http.Client` for Jina. Cuts subsequent requests from ~3s to ~200ms.
+
+```dart
+final http.Client _httpClient = http.Client();
+// Used for all _callApi POST requests.
+```
+
+---
+
+### O2c — Network Pre-warming
+
+**Problem:** Even with persistent client, the *first* query still pays the TCP tax.  
+**Fix:** Fire an `unawaited(embedder.warmUp())` call in `main.dart` the moment the app boots.
+
+```dart
+Future<void> warmUp() async {
+  await _callApi(['ok']); // Establishes TCP/TLS silently
+}
+```
 
 ---
 
@@ -1041,64 +1054,42 @@ class SourceDocument {
 
 ---
 
-## 13. KbManagerScreen UI Specification
+## 13. KbViewerScreen UI Specification
 
 ### Screen layout
 
 ```
 AppBar
   title: "Knowledge Base"
-  actions: [upload_icon_button (disabled while isIngesting)]
 
 Body:
-  if (isIngesting):
-    IngestionProgressBanner(message, fraction)   ← LinearProgressIndicator
+  if (_docs.isNotEmpty):
+    InfoBanner(count, totalChunks)  ← "2 documents bundled"
 
-  if (ragDocuments.isEmpty && !isIngesting):
-    EmptyState(icon, title, subtitle, upload_button)
+  if (_docs.isEmpty):
+    _IndexingState(spinner, title, subtitle)  ← "Setting up your knowledge base…"
 
   else:
     ListView of DocumentTile widgets
-
-FAB: "Add Document" (hidden while isIngesting)
 ```
 
 ### DocumentTile widget
 
 ```
-Container (border, rounded corners)
-  leading: FileTypeIcon (PDF=red, TXT=blue)
+Card
+  leading: PDF Icon (red/blue)
   title: document.name (ellipsis overflow)
-  subtitle: "${totalChunks} chunks · ${fileSizeKb} KB · ${formattedDate}"
-  status badge:
-    ready      → nothing (implied by green icon)
-    processing → CircularProgressIndicator (small)
-    failed     → red chip "Failed"
-  trailing: IconButton(delete, color: red)
-            disabled when status == processing
+  subtitle: "${totalChunks} chunks · ${fileSizeKb} KB"
+  trailing: Badge ("Built-in")
 ```
 
 ### Delete confirmation dialog
 
-```
-AlertDialog
-  title: "Remove document?"
-  content: "Remove '${doc.name}' from knowledge base?
-            The AI will no longer reference it."
-  actions:
-    TextButton("Cancel")
-    TextButton("Remove", color: red, onPressed: controller.deleteDocument)
-```
+**REMOVED:** Users cannot delete bundled documents.
 
 ### Ingestion progress banner
 
-```
-Container (primaryContainer background, top of body)
-  Column:
-    Text(ingestionStatus.value)           ← e.g. "Embedding 47 chunks…"
-    SizedBox(h: 8)
-    LinearProgressIndicator(value: ingestionProgress.value)
-```
+**REMOVED:** Handled by full-page `_IndexingState` since ingestion only blocks on the very first launch.
 
 ### Navigation
 
