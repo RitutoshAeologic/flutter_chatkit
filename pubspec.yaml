@@ -30,6 +30,7 @@ dependencies:
   # Document ingestion — bundled assets only (no user upload)
   syncfusion_flutter_pdf: ^27.2.4
   crypto: ^3.0.3
+  flutter_svg: ^2.2.4
 
 dev_dependencies:
   flutter_test:
@@ -46,6 +47,7 @@ flutter:
   # They will be indexed on first install and searched offline.
   assets:
     - assets/pdfs/
+    - assets/svg/
     # Add individual files here when you have PDFs:
     # - assets/pdfs/product_manual.pdf
     # - assets/pdfs/faq.pdf

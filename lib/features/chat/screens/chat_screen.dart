@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:get/get.dart';
 
 import '../../../core/network_service.dart';
@@ -108,13 +109,27 @@ class _ChatScreenState extends State<ChatScreen> {
     return Scaffold(
       appBar: AppBar(
         centerTitle: true,
-        title: const Text(
-          'DocSearch AI',
-          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+        title: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SvgPicture.asset(
+              'assets/svg/aeologic_logo.svg',
+              height: 24,
+              colorFilter: ColorFilter.mode(
+                theme.colorScheme.primary,
+                BlendMode.srcIn,
+              ),
+            ),
+            const SizedBox(width: 8),
+            const Text(
+              'DocSearch AI',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+            ),
+          ],
         ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.library_books_rounded),
+            icon: const Icon(Icons.info_outline),
             tooltip: 'Knowledge Base',
             onPressed: () => Get.toNamed('/kb-viewer'),
           ),
@@ -273,9 +288,14 @@ class _EmptyState extends StatelessWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.search_rounded,
-                size: 80,
-                color: theme.colorScheme.primary.withValues(alpha: 0.2)),
+            SvgPicture.asset(
+              'assets/svg/aeologic_logo.svg',
+              height: 80,
+              colorFilter: ColorFilter.mode(
+                theme.colorScheme.primary.withValues(alpha: 0.2),
+                BlendMode.srcIn,
+              ),
+            ),
             const SizedBox(height: 24),
             Text(
               'Ask your documents',

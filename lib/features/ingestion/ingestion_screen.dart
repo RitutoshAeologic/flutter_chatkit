@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:get/get.dart';
 
 import '../../../core/asset_ingestion_service.dart';
@@ -325,15 +326,18 @@ class _AppIcon extends StatelessWidget {
           ),
         ],
       ),
-      child: Icon(
-        state == _ScreenState.waitingForNetwork
-            ? Icons.wifi_off_rounded
-            : state == _ScreenState.error
-                ? Icons.error_outline_rounded
-                : Icons.library_books_rounded,
-        size: 50,
-        color: Colors.white,
-      ),
+      child: state == _ScreenState.waitingForNetwork
+          ? const Icon(Icons.wifi_off_rounded, size: 50, color: Colors.white)
+          : state == _ScreenState.error
+              ? const Icon(Icons.error_outline_rounded, size: 50, color: Colors.white)
+              : Center(
+                  child: SvgPicture.asset(
+                    'assets/svg/aeologic_logo.svg',
+                    width: 50,
+                    height: 50,
+                    colorFilter: const ColorFilter.mode(Colors.white, BlendMode.srcIn),
+                  ),
+                ),
     )
         .animate(onPlay: (c) => c.repeat())
         .shimmer(duration: 2000.ms, color: Colors.white24);
