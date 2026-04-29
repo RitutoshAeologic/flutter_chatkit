@@ -75,7 +75,7 @@ class _KbViewerScreenState extends State<KbViewerScreen> {
           // ── Document list ────────────────────────────────────────────────
           Expanded(
             child: _docs.isEmpty
-                ? _EmptyState(theme: theme)
+                ? _IndexingState(theme: theme)
                 : ListView.separated(
                     padding: const EdgeInsets.symmetric(
                         vertical: 16, horizontal: 16),
@@ -143,31 +143,42 @@ class _DocCard extends StatelessWidget {
   }
 }
 
-class _EmptyState extends StatelessWidget {
+/// Shows when no ready documents exist yet — can only mean indexing
+/// is still in progress (documents ARE bundled; this is not a config error).
+class _IndexingState extends StatelessWidget {
   final ThemeData theme;
-  const _EmptyState({required this.theme});
+  const _IndexingState({required this.theme});
 
   @override
   Widget build(BuildContext context) {
     return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(Icons.library_books_outlined,
-              size: 64,
-              color: theme.colorScheme.onSurface.withValues(alpha: 0.2)),
-          const SizedBox(height: 16),
-          Text('No documents loaded',
+      child: Padding(
+        padding: const EdgeInsets.all(40),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            SizedBox(
+              width: 56,
+              height: 56,
+              child: CircularProgressIndicator(
+                  strokeWidth: 3, color: theme.colorScheme.primary),
+            ),
+            const SizedBox(height: 24),
+            Text(
+              'Setting up your knowledge base…',
               style: theme.textTheme.titleMedium
-                  ?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
-          const SizedBox(height: 8),
-          Text(
-            'Add PDFs to assets/pdfs/ and rebuild the app.',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-                color: theme.colorScheme.onSurfaceVariant, fontSize: 13),
-          ),
-        ],
+                  ?.copyWith(fontWeight: FontWeight.bold),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 10),
+            Text(
+              'Documents are being indexed in the background.\nThis only happens once.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                  color: theme.colorScheme.onSurfaceVariant, fontSize: 13),
+            ),
+          ],
+        ),
       ),
     );
   }

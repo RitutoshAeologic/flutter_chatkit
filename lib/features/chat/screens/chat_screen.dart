@@ -1,20 +1,104 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
-import 'package:get/get.dart';
 import 'package:flutter_animate/flutter_animate.dart';
+import 'package:get/get.dart';
+
+import '../../../core/network_service.dart';
 import '../controllers/chat_controller.dart';
 import '../models/message.dart';
 import '../../../data/rag_models.dart';
-import '../../../core/routes/app_routes.dart';
 
-class ChatScreen extends GetView<ChatController> {
+class ChatScreen extends StatefulWidget {
   const ChatScreen({super.key});
+
+  @override
+  State<ChatScreen> createState() => _ChatScreenState();
+}
+
+class _ChatScreenState extends State<ChatScreen> {
+  final _ctrl            = Get.find<ChatController>();
+  final _network         = Get.find<NetworkService>();
+  final _textController  = TextEditingController();
+  final _scrollController = ScrollController();
+  final _inputText       = ''.obs;
+
+  // Network state
+  bool _isOnline = true;
+  StreamSubscription<bool>? _networkSub;
+
+  // Slow-response timer
+  Timer? _slowTimer;
+  bool _showSlowBanner = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkInitialNetwork();
+    _subscribeNetwork();
+    _watchSending();
+  }
+
+  Future<void> _checkInitialNetwork() async {
+    final online = await _network.isConnected;
+    if (mounted) setState(() => _isOnline = online);
+  }
+
+  void _subscribeNetwork() {
+    _networkSub = _network.onlineStream.listen((online) {
+      if (mounted) setState(() => _isOnline = online);
+    });
+  }
+
+  // Watch isSending — start a 5s timer, show "slow response" banner if still waiting
+  void _watchSending() {
+    ever(_ctrl.isSending, (bool sending) {
+      if (sending) {
+        _slowTimer?.cancel();
+        _slowTimer = Timer(const Duration(seconds: 5), () {
+          if (mounted && _ctrl.isSending.value) {
+            setState(() => _showSlowBanner = true);
+          }
+        });
+      } else {
+        _slowTimer?.cancel();
+        if (mounted) setState(() => _showSlowBanner = false);
+      }
+    });
+  }
+
+  void _scrollToBottom() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scrollController.hasClients) {
+        _scrollController.animateTo(
+          _scrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      }
+    });
+  }
+
+  void _send() {
+    final text = _textController.text.trim();
+    if (text.isEmpty) return;
+    _ctrl.sendMessage(text);
+    _textController.clear();
+    _inputText.value = '';
+  }
+
+  @override
+  void dispose() {
+    _networkSub?.cancel();
+    _slowTimer?.cancel();
+    _textController.dispose();
+    _scrollController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final textController = TextEditingController();
-    final inputText = ''.obs;
-    final scrollController = ScrollController();
 
     return Scaffold(
       appBar: AppBar(
@@ -24,27 +108,27 @@ class ChatScreen extends GetView<ChatController> {
           style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
         ),
         actions: [
-          // Knowledge Base button
-          // IconButton(
-          //   icon: const Icon(Icons.library_books_rounded),
-          //   tooltip: 'Knowledge Base',
-          //   onPressed: () => Get.toNamed(AppRoutes.kbViewer),
-          // ),
+          IconButton(
+            icon: const Icon(Icons.library_books_rounded),
+            tooltip: 'Knowledge Base',
+            onPressed: () => Get.toNamed('/kb-viewer'),
+          ),
           IconButton(
             icon: const Icon(Icons.delete_outline),
             tooltip: 'Clear chat',
             onPressed: () {
-              if (controller.messages.isNotEmpty) {
+              if (_ctrl.messages.isNotEmpty) {
                 Get.dialog(AlertDialog(
                   title: const Text('Clear chat?'),
                   actions: [
                     TextButton(onPressed: Get.back, child: const Text('Cancel')),
                     TextButton(
                       onPressed: () {
-                        controller.clearChat();
+                        _ctrl.clearChat();
                         Get.back();
                       },
-                      child: const Text('Clear', style: TextStyle(color: Colors.red)),
+                      child: const Text('Clear',
+                          style: TextStyle(color: Colors.red)),
                     ),
                   ],
                 ));
@@ -55,45 +139,55 @@ class ChatScreen extends GetView<ChatController> {
       ),
       body: Column(
         children: [
-          // ── Info banner ──────────────────────────────────────────────────
-        //  _OfflineBanner(theme: theme),
+          // ── Network offline banner ──────────────────────────────────────
+          AnimatedSwitcher(
+            duration: const Duration(milliseconds: 300),
+            child: !_isOnline
+                ? _NetworkBanner(
+                    key: const ValueKey('offline'),
+                    theme: theme,
+                    type: _BannerType.offline,
+                  )
+                : _showSlowBanner
+                    ? _NetworkBanner(
+                        key: const ValueKey('slow'),
+                        theme: theme,
+                        type: _BannerType.slow,
+                      )
+                    : const SizedBox.shrink(key: ValueKey('none')),
+          ),
 
-          // ── Messages ─────────────────────────────────────────────────────
+          // ── Messages ────────────────────────────────────────────────────
           Expanded(
             child: Obx(() {
-              if (controller.messages.isEmpty) {
+              if (_ctrl.messages.isEmpty) {
                 return _EmptyState(theme: theme);
               }
-              WidgetsBinding.instance.addPostFrameCallback((_) {
-                if (scrollController.hasClients) {
-                  scrollController.animateTo(
-                    scrollController.position.maxScrollExtent,
-                    duration: const Duration(milliseconds: 300),
-                    curve: Curves.easeOut,
-                  );
-                }
-              });
+              _scrollToBottom();
               return ListView.builder(
-                controller: scrollController,
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-                itemCount: controller.messages.length,
+                controller: _scrollController,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                itemCount: _ctrl.messages.length,
                 itemBuilder: (context, index) {
                   return _MessageBubble(
-                    message: controller.messages[index],
+                    message: _ctrl.messages[index],
                     theme: theme,
-                    citations: controller.citationsFor(controller.messages[index].id),
+                    citations: _ctrl.citationsFor(_ctrl.messages[index].id),
                   );
                 },
               );
             }),
           ),
 
-          // ── Input bar ─────────────────────────────────────────────────────
+          // ── Input bar ──────────────────────────────────────────────────
           _InputBar(
             theme: theme,
-            controller: controller,
-            textController: textController,
-            inputText: inputText,
+            controller: _ctrl,
+            textController: _textController,
+            inputText: _inputText,
+            isOnline: _isOnline,
+            onSend: _send,
           ),
         ],
       ),
@@ -101,40 +195,62 @@ class ChatScreen extends GetView<ChatController> {
   }
 }
 
-// ── Offline banner ─────────────────────────────────────────────────────────────
+// ── Network / slow banner ───────────────────────────────────────────────────────
 
-class _OfflineBanner extends StatelessWidget {
+enum _BannerType { offline, slow }
+
+class _NetworkBanner extends StatelessWidget {
   final ThemeData theme;
-  const _OfflineBanner({required this.theme});
+  final _BannerType type;
+
+  const _NetworkBanner({super.key, required this.theme, required this.type});
 
   @override
   Widget build(BuildContext context) {
+    final isOffline = type == _BannerType.offline;
+
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      color: theme.colorScheme.tertiaryContainer.withValues(alpha: 0.4),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
+      color: isOffline
+          ? theme.colorScheme.errorContainer.withValues(alpha: 0.9)
+          : theme.colorScheme.tertiaryContainer.withValues(alpha: 0.9),
       child: Row(
         children: [
-          Icon(Icons.offline_bolt_rounded,
-              size: 14, color: theme.colorScheme.tertiary),
-          const SizedBox(width: 8),
+          // Animated icon
+          if (!isOffline)
+            SizedBox(
+              width: 14,
+              height: 14,
+              child: CircularProgressIndicator(
+                  strokeWidth: 2, color: theme.colorScheme.tertiary),
+            )
+          else
+            Icon(Icons.wifi_off_rounded,
+                size: 14,
+                color: theme.colorScheme.onErrorContainer),
+          const SizedBox(width: 10),
           Expanded(
             child: Text(
-              '100% offline · Answers extracted directly from your documents · No AI generation',
+              isOffline
+                  ? 'No internet connection. Queries need a brief online moment for embedding. Check your connection.'
+                  : 'Taking longer than usual… Processing your query via AI. Please wait.',
               style: TextStyle(
-                fontSize: 11,
-                color: theme.colorScheme.onTertiaryContainer,
+                fontSize: 12,
                 fontWeight: FontWeight.w500,
+                color: isOffline
+                    ? theme.colorScheme.onErrorContainer
+                    : theme.colorScheme.onTertiaryContainer,
               ),
             ),
           ),
         ],
       ),
-    );
+    ).animate().slideY(begin: -1, end: 0, duration: 250.ms, curve: Curves.easeOut);
   }
 }
 
-// ── Empty state ────────────────────────────────────────────────────────────────
+// ── Empty state ─────────────────────────────────────────────────────────────────
 
 class _EmptyState extends StatelessWidget {
   final ThemeData theme;
@@ -149,37 +265,26 @@ class _EmptyState extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(Icons.search_rounded,
-                size: 80, color: theme.colorScheme.primary.withValues(alpha: 0.2)),
+                size: 80,
+                color: theme.colorScheme.primary.withValues(alpha: 0.2)),
             const SizedBox(height: 24),
             Text(
               'Ask your documents',
-              style: theme.textTheme.headlineSmall?.copyWith(
-                  fontWeight: FontWeight.bold),
+              style: theme.textTheme.headlineSmall
+                  ?.copyWith(fontWeight: FontWeight.bold),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 12),
             Text(
-             // 'Upload PDFs or text files via 📚, then ask questions. '
-              'Answers are extracted directly from documents',
+              'Answers are extracted directly from your bundled documents.',
               textAlign: TextAlign.center,
               style: TextStyle(
                   color: theme.colorScheme.onSurfaceVariant, fontSize: 14),
             ),
             const SizedBox(height: 32),
-            // FilledButton.icon(
-            //   onPressed: () => Get.toNamed(AppRoutes.kbViewer),
-            //   icon: const Icon(Icons.upload_file),
-            //   label: const Text('Upload Documents'),
-            //   style: FilledButton.styleFrom(
-            //       minimumSize: const Size(200, 50)),
-            // ),
-            // const SizedBox(height: 24),
-            _SampleQuestionChip(
-                label: 'What is this document about?'),
-            _SampleQuestionChip(
-                label: 'Summarize the key findings'),
-            _SampleQuestionChip(
-                label: 'What are the main conclusions?'),
+            _SampleChip(label: 'What is this document about?'),
+            _SampleChip(label: 'Summarize the key findings'),
+            _SampleChip(label: 'What are the main conclusions?'),
           ],
         ).animate().fadeIn(duration: 600.ms),
       ),
@@ -187,9 +292,9 @@ class _EmptyState extends StatelessWidget {
   }
 }
 
-class _SampleQuestionChip extends StatelessWidget {
+class _SampleChip extends StatelessWidget {
   final String label;
-  const _SampleQuestionChip({required this.label});
+  const _SampleChip({required this.label});
 
   @override
   Widget build(BuildContext context) {
@@ -280,7 +385,7 @@ class _MessageBubble extends StatelessWidget {
             ],
           ),
 
-          // Citations chip row (only for answers with sources)
+          // Citations
           if (citations != null && citations!.isNotEmpty)
             _CitationsChips(citations: citations!, theme: theme),
         ],
@@ -289,7 +394,6 @@ class _MessageBubble extends StatelessWidget {
   }
 }
 
-/// Simple text with bold/italic parsing (avoids flutter_markdown_plus dep).
 class _MarkdownText extends StatelessWidget {
   final String text;
   final bool isUser;
@@ -347,14 +451,13 @@ class _TypingIndicator extends StatelessWidget {
   }
 }
 
-// ── Citations chip row ──────────────────────────────────────────────────────────
+// ── Citations ───────────────────────────────────────────────────────────────────
 
 class _CitationsChips extends StatelessWidget {
   final List<RagCitation> citations;
   final ThemeData theme;
 
-  const _CitationsChips(
-      {required this.citations, required this.theme});
+  const _CitationsChips({required this.citations, required this.theme});
 
   @override
   Widget build(BuildContext context) {
@@ -386,19 +489,23 @@ class _CitationsChips extends StatelessWidget {
   }
 }
 
-// ── Input bar ──────────────────────────────────────────────────────────────────
+// ── Input bar ───────────────────────────────────────────────────────────────────
 
 class _InputBar extends StatelessWidget {
   final ThemeData theme;
   final ChatController controller;
   final TextEditingController textController;
   final RxString inputText;
+  final bool isOnline;
+  final VoidCallback onSend;
 
   const _InputBar({
     required this.theme,
     required this.controller,
     required this.textController,
     required this.inputText,
+    required this.isOnline,
+    required this.onSend,
   });
 
   @override
@@ -415,55 +522,77 @@ class _InputBar extends StatelessWidget {
           ),
         ],
       ),
-      child: Row(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Expanded(
-            child: Container(
-              decoration: BoxDecoration(
-                color: theme.colorScheme.surfaceContainerHigh,
-                borderRadius: BorderRadius.circular(28),
-              ),
-              child: TextField(
-                controller: textController,
-                onChanged: (v) => inputText.value = v,
-                decoration: const InputDecoration(
-                  hintText: 'Ask a question about your documents…',
-                  border: InputBorder.none,
-                  contentPadding:
-                      EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-                ),
-                maxLines: 4,
-                minLines: 1,
-                onSubmitted: (v) {
-                  if (v.trim().isNotEmpty) {
-                    controller.sendMessage(v);
-                    textController.clear();
-                    inputText.value = '';
-                  }
-                },
+          // Offline hint above input (compact, non-blocking)
+          if (!isOnline)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Row(
+                children: [
+                  Icon(Icons.wifi_off_rounded,
+                      size: 12,
+                      color: theme.colorScheme.error.withValues(alpha: 0.7)),
+                  const SizedBox(width: 6),
+                  Text(
+                    'Offline — queries will be sent when connected',
+                    style: TextStyle(
+                        fontSize: 11,
+                        color: theme.colorScheme.error.withValues(alpha: 0.7)),
+                  ),
+                ],
               ),
             ),
+
+          Row(
+            children: [
+              Expanded(
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.surfaceContainerHigh,
+                    borderRadius: BorderRadius.circular(28),
+                    border: !isOnline
+                        ? Border.all(
+                            color: theme.colorScheme.error.withValues(alpha: 0.4),
+                            width: 1)
+                        : null,
+                  ),
+                  child: TextField(
+                    controller: textController,
+                    onChanged: (v) => inputText.value = v,
+                    decoration: InputDecoration(
+                      hintText: isOnline
+                          ? 'Ask a question about your documents…'
+                          : 'No connection — questions queued when online',
+                      border: InputBorder.none,
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 20, vertical: 14),
+                    ),
+                    maxLines: 4,
+                    minLines: 1,
+                    onSubmitted: (_) => onSend(),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Obx(() => IconButton.filled(
+                    onPressed: controller.isSending.value ||
+                            inputText.value.trim().isEmpty
+                        ? null
+                        : onSend,
+                    icon: controller.isSending.value
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2, color: Colors.white))
+                        : const Icon(Icons.search_rounded),
+                    style: IconButton.styleFrom(
+                        minimumSize: const Size(52, 52)),
+                  )),
+            ],
           ),
-          const SizedBox(width: 10),
-          Obx(() => IconButton.filled(
-                onPressed: controller.isSending.value ||
-                        inputText.value.trim().isEmpty
-                    ? null
-                    : () {
-                        controller.sendMessage(textController.text);
-                        textController.clear();
-                        inputText.value = '';
-                      },
-                icon: controller.isSending.value
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(
-                            strokeWidth: 2, color: Colors.white))
-                    : const Icon(Icons.search_rounded),
-                style: IconButton.styleFrom(
-                    minimumSize: const Size(52, 52)),
-              )),
         ],
       ),
     );
