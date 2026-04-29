@@ -187,18 +187,33 @@ class ChatController extends GetxController {
     }
 
     final contextBlock = result.contextBlock;
+
+    // Trim each chunk to chunkContextMaxChars to reduce Groq prompt tokens.
+    // Fewer tokens = faster response. The most relevant sentence is usually
+    // near the start of a chunk (highest-scoring match).
+    final trimmedBlock = contextBlock.split('\n\n').map((block) {
+      final lines = block.split('\n');
+      if (lines.length < 2) return block;
+      final header = lines.first; // "[N] filename p.X"
+      final body   = lines.sublist(1).join('\n');
+      final trimmed = body.length > AppConfig.chunkContextMaxChars
+          ? '${body.substring(0, AppConfig.chunkContextMaxChars)}…'
+          : body;
+      return '$header\n$trimmed';
+    }).join('\n\n');
+
     final userMessage = '''
 === DOCUMENT EXCERPTS (your ONLY allowed source) ===
 
-$contextBlock
+$trimmedBlock
 
 === END OF EXCERPTS ===
 
-Using ONLY the excerpts above (do not use any outside knowledge), please answer this question in a clear, friendly, and concise way:
+Using ONLY the excerpts above (do not use any outside knowledge), answer concisely:
 
 $query
 
-Remember: if the answer is not in the excerpts, say exactly "I couldn't find this information in the loaded documents."
+If the answer is not in the excerpts, say exactly "I couldn't find this information in the loaded documents."
 ''';
 
     final groqMessages = [

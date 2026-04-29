@@ -15,7 +15,8 @@ dependencies:
   get: ^4.6.6
   http: ^1.2.2           # Jina embed API (ingestion) + optional Groq formatter
   uuid: ^4.5.1
-  connectivity_plus: ^6.1.4  # network state monitoring (offline detection)
+  connectivity_plus: ^6.1.4  # network state monitoring
+  shared_preferences: ^2.3.5  # persist query embed cache across sessions
 
   # UI
   flutter_animate: ^4.5.0

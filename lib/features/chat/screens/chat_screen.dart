@@ -25,11 +25,11 @@ class ChatScreen extends GetView<ChatController> {
         ),
         actions: [
           // Knowledge Base button
-          IconButton(
-            icon: const Icon(Icons.library_books_rounded),
-            tooltip: 'Knowledge Base',
-            onPressed: () => Get.toNamed(AppRoutes.kbViewer),
-          ),
+          // IconButton(
+          //   icon: const Icon(Icons.library_books_rounded),
+          //   tooltip: 'Knowledge Base',
+          //   onPressed: () => Get.toNamed(AppRoutes.kbViewer),
+          // ),
           IconButton(
             icon: const Icon(Icons.delete_outline),
             tooltip: 'Clear chat',
@@ -56,7 +56,7 @@ class ChatScreen extends GetView<ChatController> {
       body: Column(
         children: [
           // ── Info banner ──────────────────────────────────────────────────
-          _OfflineBanner(theme: theme),
+        //  _OfflineBanner(theme: theme),
 
           // ── Messages ─────────────────────────────────────────────────────
           Expanded(
@@ -159,21 +159,21 @@ class _EmptyState extends StatelessWidget {
             ),
             const SizedBox(height: 12),
             Text(
-              'Upload PDFs or text files via 📚, then ask questions. '
-              'Answers are extracted directly from your documents — no internet required.',
+             // 'Upload PDFs or text files via 📚, then ask questions. '
+              'Answers are extracted directly from documents',
               textAlign: TextAlign.center,
               style: TextStyle(
                   color: theme.colorScheme.onSurfaceVariant, fontSize: 14),
             ),
             const SizedBox(height: 32),
-            FilledButton.icon(
-              onPressed: () => Get.toNamed(AppRoutes.kbViewer),
-              icon: const Icon(Icons.upload_file),
-              label: const Text('Upload Documents'),
-              style: FilledButton.styleFrom(
-                  minimumSize: const Size(200, 50)),
-            ),
-            const SizedBox(height: 24),
+            // FilledButton.icon(
+            //   onPressed: () => Get.toNamed(AppRoutes.kbViewer),
+            //   icon: const Icon(Icons.upload_file),
+            //   label: const Text('Upload Documents'),
+            //   style: FilledButton.styleFrom(
+            //       minimumSize: const Size(200, 50)),
+            // ),
+            // const SizedBox(height: 24),
             _SampleQuestionChip(
                 label: 'What is this document about?'),
             _SampleQuestionChip(

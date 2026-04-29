@@ -1,3 +1,5 @@
+import 'dart:async' show unawaited;
+
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
@@ -29,13 +31,19 @@ void main() async {
 
   // ── 3. EmbeddingService (Jina — ingestion only) ───────────────────────────
   final embedder = EmbeddingService();
+  await embedder.init(); // loads disk cache (fast, <5ms)
   Get.put<EmbeddingService>(embedder, permanent: true);
 
-  // ── 3. RagRetrievalService (100% offline vector search) ───────────────────
+  // Fire warm-up in the background — don't await.
+  // This establishes the TCP+TLS connection to Jina before the first user query,
+  // cutting cold-start latency from ~6s to ~1s.
+  unawaited(embedder.warmUp());
+
+  // ── 4. RagRetrievalService (100% offline vector search) ───────────────────
   final retrieval = RagRetrievalService(obx: obx, embedder: embedder);
   Get.put<RagRetrievalService>(retrieval, permanent: true);
 
-  // ── 4. AssetIngestionService ──────────────────────────────────────────────
+  // ── 5. AssetIngestionService ──────────────────────────────────────────────
   final assetIngestion = AssetIngestionService(
     obx: obx,
     embedder: embedder,

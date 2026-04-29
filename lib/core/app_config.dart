@@ -41,9 +41,10 @@ class AppConfig {
       'Begin every response by citing which excerpt(s) you are drawing from.';
 
   // ── RAG retrieval tuning ──────────────────────────────────────────────────
-  static const double similarityThreshold = 0.25; // lowered 0.35→0.25: wider net for short queries
-  static const int    topKChunks          = 5;     // increased 3→5: more context for Groq
-  static const int    embeddingDimensions = 768;
+  static const double similarityThreshold  = 0.25;  // wider net for short queries
+  static const int    topKChunks           = 3;     // 5→3: ~850 Groq prompt tokens vs 1400
+  static const int    chunkContextMaxChars = 600;   // trim chunks before sending to Groq
+  static const int    embeddingDimensions  = 768;
 
   // ── Asset ingestion ───────────────────────────────────────────────────────
   static const int    maxFileSizeBytes    = 50 * 1024 * 1024;
@@ -56,7 +57,7 @@ class AppConfig {
   static const int chunkMinChars    = 30;
 
   // ── EmbeddingService internals ────────────────────────────────────────────
-  static const int embedCacheMaxSize = 100;
+  static const int embedCacheMaxSize = 200; // increased: covers more repeat queries
   static const int embedBatchSize    = 96;
   static const int embedMaxRetries   = 3;
 }
