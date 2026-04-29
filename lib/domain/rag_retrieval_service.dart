@@ -74,36 +74,43 @@ class RagRetrievalService {
       return const RagRetrievalResult.empty();
     }
 
-    // Sort descending by score, take top-K (NO dedup by sourceLabel —
-    // multiple chunks from same document are all valuable context)
+    // Sort descending by score, take top-K chunks for context richness
     scored.sort((a, b) => b.score.compareTo(a.score));
     final topChunks = scored.take(AppConfig.topKChunks).toList();
 
-    // Build context block
-    final citations = <RagCitation>[];
+    // Build context block (ALL top-K chunks sent to Groq for rich context)
     final contextLines = <String>[];
     for (int i = 0; i < topChunks.length; i++) {
-      final item = topChunks[i];
-      final idx = i + 1;
-      final preview = item.chunk.text.length > 120
-          ? '${item.chunk.text.substring(0, 120)}…'
-          : item.chunk.text;
-      contextLines.add('[$idx] ${item.chunk.sourceLabel}\n${item.chunk.text}');
-      citations.add(RagCitation(
-        index: idx,
-        sourceLabel: item.chunk.sourceLabel,
-        score: item.score,
-        preview: preview,
-      ));
-      debugPrint('RagRetrievalService: [$idx] "${item.chunk.sourceLabel}" '
-          'score=${item.score.toStringAsFixed(3)} '
-          'text_preview="${item.chunk.text.substring(0, item.chunk.text.length.clamp(0, 80))}"');
+      contextLines.add('[${i + 1}] ${topChunks[i].chunk.sourceLabel}\n${topChunks[i].chunk.text}');
+      debugPrint('RagRetrievalService: [${i + 1}] "${topChunks[i].chunk.sourceLabel}" '
+          'score=${topChunks[i].score.toStringAsFixed(3)} '
+          'text_preview="${topChunks[i].chunk.text.substring(0, topChunks[i].chunk.text.length.clamp(0, 80))}"');
+    }
+    final contextBlock = contextLines.join('\n\n');
+
+    // Build citations for UI — dedup by documentId (show each source only once,
+    // using the highest-scoring chunk as representative)
+    final seenDocIds = <String>{};
+    final citations = <RagCitation>[];
+    int citIdx = 1;
+    for (final item in topChunks) {
+      if (seenDocIds.add(item.chunk.documentId)) {
+        final preview = item.chunk.text.length > 120
+            ? '${item.chunk.text.substring(0, 120)}…'
+            : item.chunk.text;
+        citations.add(RagCitation(
+          index: citIdx++,
+          sourceLabel: item.chunk.sourceLabel,
+          score: item.score,
+          preview: preview,
+        ));
+      }
     }
 
     totalSw.stop();
-    debugPrint('RagRetrievalService: retrieve() TOTAL = ${totalSw.elapsedMilliseconds}ms (${topChunks.length} citations)');
+    debugPrint('RagRetrievalService: retrieve() TOTAL = ${totalSw.elapsedMilliseconds}ms '
+        '(${topChunks.length} chunks → ${citations.length} unique sources)');
 
-    final contextBlock = contextLines.join('\n\n');
     return RagRetrievalResult(
       contextBlock: contextBlock,
       citations: citations,

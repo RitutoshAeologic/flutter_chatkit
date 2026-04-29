@@ -25,7 +25,7 @@ dependencies:
   objectbox: ^5.3.1
   objectbox_flutter_libs: ^5.3.1
 
-  # Document ingestion (bundled assets only — no file_picker needed)
+  # Document ingestion — bundled assets only (no user upload)
   syncfusion_flutter_pdf: ^27.2.4
   crypto: ^3.0.3
 
