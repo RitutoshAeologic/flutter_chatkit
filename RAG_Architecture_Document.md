@@ -525,6 +525,16 @@ class AppConfig {
 }
 ```
 
+> **Why `String.fromEnvironment`?**  
+> We **never** hardcode API keys directly into the source code. Doing so would leak your keys if you push the code to a public Git repository. 
+> `String.fromEnvironment` reads values passed from the command line *at compile time*. 
+> 
+> To run the app during development, you must pass these flags:
+> `flutter run --dart-define=JINA_API_KEY=jina_... --dart-define=GROQ_API_KEY=gsk_...`
+> 
+> To build an APK for production:
+> `flutter build apk --dart-define=JINA_API_KEY=... --dart-define=GROQ_API_KEY=...`
+
 ### EmbeddingService
 
 ```dart
