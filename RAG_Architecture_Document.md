@@ -1143,7 +1143,7 @@ dev_dependencies:
 
 **Minimum Flutter version:** 3.19.0 (required by ObjectBox 4.x / Dart 3.3)  
 **Minimum Android SDK:** 21  
-**Minimum iOS:** 13.0
+**Minimum iOS:** 15.0
 
 ---
 
