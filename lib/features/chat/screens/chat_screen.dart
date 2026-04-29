@@ -82,9 +82,14 @@ class _ChatScreenState extends State<ChatScreen> {
   void _send() {
     final text = _textController.text.trim();
     if (text.isEmpty) return;
+    
+    // Dismiss keyboard when sending a query
+    FocusScope.of(context).unfocus();
+
     _ctrl.sendMessage(text);
     _textController.clear();
     _inputText.value = '';
+    _scrollToBottom();
   }
 
   @override
@@ -137,8 +142,10 @@ class _ChatScreenState extends State<ChatScreen> {
           ),
         ],
       ),
-      body: Column(
-        children: [
+      body: GestureDetector(
+        onTap: () => FocusScope.of(context).unfocus(), // Dismiss keyboard on tap outside
+        child: Column(
+          children: [
           // ── Network offline banner ──────────────────────────────────────
           AnimatedSwitcher(
             duration: const Duration(milliseconds: 300),
@@ -166,6 +173,7 @@ class _ChatScreenState extends State<ChatScreen> {
               _scrollToBottom();
               return ListView.builder(
                 controller: _scrollController,
+                keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag, // Auto dismiss keyboard on scroll
                 padding:
                     const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
                 itemCount: _ctrl.messages.length,
@@ -190,6 +198,7 @@ class _ChatScreenState extends State<ChatScreen> {
             onSend: _send,
           ),
         ],
+      ),
       ),
     );
   }
@@ -282,29 +291,8 @@ class _EmptyState extends StatelessWidget {
                   color: theme.colorScheme.onSurfaceVariant, fontSize: 14),
             ),
             const SizedBox(height: 32),
-            _SampleChip(label: 'What is this document about?'),
-            _SampleChip(label: 'Summarize the key findings'),
-            _SampleChip(label: 'What are the main conclusions?'),
           ],
         ).animate().fadeIn(duration: 600.ms),
-      ),
-    );
-  }
-}
-
-class _SampleChip extends StatelessWidget {
-  final String label;
-  const _SampleChip({required this.label});
-
-  @override
-  Widget build(BuildContext context) {
-    final ctrl = Get.find<ChatController>();
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: ActionChip(
-        label: Text(label, style: const TextStyle(fontSize: 13)),
-        avatar: const Icon(Icons.lightbulb_outline, size: 16),
-        onPressed: () => ctrl.sendMessage(label),
       ),
     );
   }
