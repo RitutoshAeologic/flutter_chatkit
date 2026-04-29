@@ -10,13 +10,13 @@ class ChatKitApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return GetMaterialApp(
-      title: 'ChatKit AI',
+      title: 'DocSearch AI',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.light,
       darkTheme: AppTheme.dark,
       themeMode: ThemeMode.system,
       initialBinding: AppBinding(),
-      initialRoute: AppRoutes.splash,
+      initialRoute: AppRoutes.chat, // straight to chat — no auth
       getPages: AppRoutes.pages,
     );
   }
