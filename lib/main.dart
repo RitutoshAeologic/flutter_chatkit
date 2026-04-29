@@ -54,9 +54,8 @@ void main() async {
   // ── 6. Decide initial route ───────────────────────────────────────────────
   // First install (or reinstall): show ingestion screen to index bundled PDFs.
   // Subsequent launches: skip straight to chat (ObjectBox already populated).
-  final initialRoute = assetIngestion.isAlreadyIngested
-      ? AppRoutes.chat
-      : AppRoutes.ingestion;
+  final needsIngest = await assetIngestion.needsIngestion();
+  final initialRoute = needsIngest ? AppRoutes.ingestion : AppRoutes.chat;
 
   runApp(ChatKitApp(initialRoute: initialRoute));
 }

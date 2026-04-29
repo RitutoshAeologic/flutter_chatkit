@@ -93,7 +93,7 @@ class _IngestionScreenState extends State<IngestionScreen> {
     });
 
     _ingestSub?.cancel();
-    _ingestSub = _ingestion.ingestAll().listen(
+    _ingestSub = _ingestion.forceReingest().listen(
       (event) {
         if (!mounted) return;
         switch (event) {

@@ -121,18 +121,43 @@ class AssetIngestionService {
         _embedder = embedder,
         _retrieval = retrieval;
 
-  /// True if at least one bundled PDF is already ingested and ready.
-  bool get isAlreadyIngested {
+  /// Checks if the bundled PDFs exactly match the indexed ones.
+  /// If there's a mismatch (added, removed, or changed PDFs), returns true
+  /// so the app can route to IngestionScreen and run `forceReingest()`.
+  Future<bool> needsIngestion() async {
+    final pdfPaths = await _listBundledPdfs();
+    if (pdfPaths.isEmpty) return false;
+
+    // Get all ready bundled_pdf document IDs from ObjectBox
     final q = _obx
         .box<SourceDocument>()
         .query(SourceDocument_.fileType.equals('bundled_pdf') &
             SourceDocument_.status.equals(IngestionStatus.ready.name))
         .build();
-    try {
-      return q.count() > 0;
-    } finally {
-      q.close();
+    final dbDocs = q.find();
+    q.close();
+
+    final dbDocIds = dbDocs.map((d) => d.documentId).toSet();
+    final manifestDocIds = <String>{};
+
+    for (final path in pdfPaths) {
+      try {
+        final data = await rootBundle.load(path);
+        final bytes = data.buffer.asUint8List();
+        final docId = sha256.convert(bytes).toString().substring(0, 16);
+        manifestDocIds.add(docId);
+      } catch (e) {
+        debugPrint('AssetIngestionService: failed to hash $path - $e');
+        return true; // Force re-ingest if we can't read an asset
+      }
     }
+
+    // Check if sets match exactly
+    if (dbDocIds.length != manifestDocIds.length) return true;
+    if (!dbDocIds.containsAll(manifestDocIds)) return true;
+    if (!manifestDocIds.containsAll(dbDocIds)) return true;
+
+    return false; // Exactly the same, skip ingestion
   }
 
   /// Returns list of all bundled PDF asset paths from AssetManifest.
