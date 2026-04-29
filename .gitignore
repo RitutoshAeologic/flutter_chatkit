@@ -53,3 +53,4 @@ lib/firebase_options.dart
 # Firebase Functions
 functions/node_modules/
 functions/lib/
+ios/build/

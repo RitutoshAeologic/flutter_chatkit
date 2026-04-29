@@ -4,9 +4,11 @@ import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import '../controllers/chat_controller.dart';
 import '../models/message.dart';
-import '../models/chat_session.dart';
 import '../../auth/controllers/auth_controller.dart';
 import '../widgets/image_message_bubble.dart';
+import '../../kb_manager/screens/kb_manager_screen.dart';
+import '../../kb_manager/bindings/kb_manager_binding.dart';
+import '../../../data/rag_models.dart';
 
 class ChatScreen extends GetView<ChatController> {
   const ChatScreen({super.key});
@@ -15,17 +17,19 @@ class ChatScreen extends GetView<ChatController> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final textController = TextEditingController();
-    final inputText = "".obs;
+    final inputText = ''.obs;
 
     return Scaffold(
       drawer: _buildHistoryDrawer(context, theme),
       appBar: AppBar(
         centerTitle: true,
         title: Obx(() => Text(
-          controller.currentSession.value?.displayTitle ?? 'ChatKit AI',
-          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
-        )),
+              controller.currentSession.value?.displayTitle ?? 'ChatKit AI',
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+            )),
         actions: [
+          // Knowledge Base icon with document count badge
+          _KbBadgeButton(),
           IconButton(
             icon: const Icon(Icons.add_circle_outline),
             tooltip: 'New Chat',
@@ -77,25 +81,42 @@ class ChatScreen extends GetView<ChatController> {
         children: [
           DrawerHeader(
             decoration: BoxDecoration(
-              color: theme.colorScheme.primaryContainer.withOpacity(0.3),
+              color: theme.colorScheme.primaryContainer.withValues(alpha: 0.3),
             ),
             child: Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                   Icon(Icons.auto_awesome_mosaic_rounded, size: 40, color: theme.colorScheme.primary),
+                  Icon(Icons.auto_awesome_mosaic_rounded,
+                      size: 40, color: theme.colorScheme.primary),
                   const SizedBox(height: 12),
-                  const Text('Chat History', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20)),
+                  const Text('Chat History',
+                      style:
+                          TextStyle(fontWeight: FontWeight.bold, fontSize: 20)),
                 ],
               ),
             ),
           ),
           ListTile(
             leading: const Icon(Icons.add),
-            title: const Text('Start New Chat', style: TextStyle(fontWeight: FontWeight.w600)),
+            title: const Text('Start New Chat',
+                style: TextStyle(fontWeight: FontWeight.w600)),
             onTap: () {
               controller.startNewChat();
               Get.back();
+            },
+          ),
+          // Knowledge Base drawer entry
+          ListTile(
+            leading: const Icon(Icons.library_books_rounded),
+            title: const Text('Knowledge Base',
+                style: TextStyle(fontWeight: FontWeight.w600)),
+            onTap: () {
+              Get.back();
+              Get.to(
+                () => const KbManagerScreen(),
+                binding: KbManagerBinding(),
+              );
             },
           ),
           const Divider(),
@@ -112,21 +133,29 @@ class ChatScreen extends GetView<ChatController> {
                 itemCount: controller.sessions.length,
                 itemBuilder: (context, index) {
                   final session = controller.sessions[index];
-                  final isCurrent = controller.currentSession.value?.id == session.id;
+                  final isCurrent =
+                      controller.currentSession.value?.id == session.id;
                   return ListTile(
                     selected: isCurrent,
-                    selectedTileColor: theme.colorScheme.primaryContainer.withOpacity(0.5),
+                    selectedTileColor:
+                        theme.colorScheme.primaryContainer.withValues(alpha: 0.5),
                     leading: const Icon(Icons.chat_bubble_outline),
-                    title: Text(session.displayTitle, maxLines: 1, overflow: TextOverflow.ellipsis),
+                    title: Text(session.displayTitle,
+                        maxLines: 1, overflow: TextOverflow.ellipsis),
                     subtitle: Text(
-                      '${session.lastUpdated.day}/${session.lastUpdated.month} ${session.lastUpdated.hour}:${session.lastUpdated.minute.toString().padLeft(2, '0')}',
+                      '${session.lastUpdated.day}/${session.lastUpdated.month} '
+                      '${session.lastUpdated.hour}:'
+                      '${session.lastUpdated.minute.toString().padLeft(2, '0')}',
                       style: const TextStyle(fontSize: 10),
                     ),
                     onTap: () {
                       controller.selectSession(session);
                       Get.back();
                     },
-                    trailing: isCurrent ? Icon(Icons.check_circle, color: theme.colorScheme.primary, size: 16) : null,
+                    trailing: isCurrent
+                        ? Icon(Icons.check_circle,
+                            color: theme.colorScheme.primary, size: 16)
+                        : null,
                   );
                 },
               );
@@ -145,11 +174,13 @@ class ChatScreen extends GetView<ChatController> {
       child: OutlinedButton.icon(
         onPressed: () => _showClearAllConfirmation(context),
         icon: const Icon(Icons.delete_sweep, color: Colors.red),
-        label: const Text('Clear All History', style: TextStyle(color: Colors.red)),
+        label: const Text('Clear All History',
+            style: TextStyle(color: Colors.red)),
         style: OutlinedButton.styleFrom(
           side: const BorderSide(color: Colors.red),
           minimumSize: const Size(double.infinity, 50),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         ),
       ),
     );
@@ -159,7 +190,8 @@ class ChatScreen extends GetView<ChatController> {
     Get.dialog(
       AlertDialog(
         title: const Text('Clear All History?'),
-        content: const Text('This will wipe your entire conversation history. This action cannot be undone.'),
+        content: const Text(
+            'This will wipe your entire conversation history. This action cannot be undone.'),
         actions: [
           TextButton(onPressed: () => Get.back(), child: const Text('Cancel')),
           TextButton(
@@ -168,7 +200,8 @@ class ChatScreen extends GetView<ChatController> {
               Get.back();
               Get.back();
             },
-            child: const Text('Clear Everything', style: TextStyle(color: Colors.red)),
+            child: const Text('Clear Everything',
+                style: TextStyle(color: Colors.red)),
           ),
         ],
       ),
@@ -181,7 +214,9 @@ class ChatScreen extends GetView<ChatController> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.chat_bubble_outline_rounded, size: 80, color: theme.colorScheme.primary.withOpacity(0.2)),
+            Icon(Icons.chat_bubble_outline_rounded,
+                size: 80,
+                color: theme.colorScheme.primary.withValues(alpha: 0.2)),
             const SizedBox(height: 24),
             Text(
               'How can I help you today?',
@@ -193,10 +228,13 @@ class ChatScreen extends GetView<ChatController> {
             ),
             _buildEmptyStateTip(theme),
             const SizedBox(height: 32),
-            _buildQuickPrompt(theme, "Write a creative story about space."),
-            _buildQuickPrompt(theme, "Explain Quantum Physics to a 5-year-old."),
-            _buildQuickPrompt(theme, "Give me a healthy 5-minute breakfast idea."),
-            _buildQuickPrompt(theme, "/image a futuristic city under the ocean"),
+            _buildQuickPrompt(theme, 'Write a creative story about space.'),
+            _buildQuickPrompt(
+                theme, 'Explain Quantum Physics to a 5-year-old.'),
+            _buildQuickPrompt(
+                theme, 'Give me a healthy 5-minute breakfast idea.'),
+            _buildQuickPrompt(
+                theme, '/image a futuristic city under the ocean'),
           ],
         ).animate().fadeIn(duration: 800.ms).scale(begin: const Offset(0.9, 0.9)),
       ),
@@ -208,17 +246,18 @@ class ChatScreen extends GetView<ChatController> {
       margin: const EdgeInsets.fromLTRB(40, 24, 40, 0),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: theme.colorScheme.primary.withOpacity(0.05),
+        color: theme.colorScheme.primary.withValues(alpha: 0.05),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: theme.colorScheme.primary.withOpacity(0.1)),
+        border: Border.all(color: theme.colorScheme.primary.withValues(alpha: 0.1)),
       ),
       child: Row(
         children: [
-          Icon(Icons.auto_fix_high, color: theme.colorScheme.primary, size: 20),
+          Icon(Icons.auto_fix_high,
+              color: theme.colorScheme.primary, size: 20),
           const SizedBox(width: 12),
           Expanded(
             child: Text(
-              'Pro Tip: type "/image" followed by a prompt to generate stunning AI images!',
+              'Tip: upload documents via the 📚 button, then ask questions about them!',
               style: TextStyle(
                 fontSize: 13,
                 color: theme.colorScheme.primary,
@@ -245,9 +284,15 @@ class ChatScreen extends GetView<ChatController> {
           ),
           child: Row(
             children: [
-              Icon(prompt.contains('/image') ? Icons.image_outlined : Icons.lightbulb_outline, size: 18, color: theme.colorScheme.primary),
+              Icon(
+                  prompt.contains('/image')
+                      ? Icons.image_outlined
+                      : Icons.lightbulb_outline,
+                  size: 18,
+                  color: theme.colorScheme.primary),
               const SizedBox(width: 12),
-              Expanded(child: Text(prompt, style: const TextStyle(fontSize: 14))),
+              Expanded(
+                  child: Text(prompt, style: const TextStyle(fontSize: 14))),
               const Icon(Icons.arrow_forward_ios, size: 12),
             ],
           ),
@@ -258,35 +303,47 @@ class ChatScreen extends GetView<ChatController> {
 
   Widget _buildMessageBubble(ChatMessage message, ThemeData theme) {
     final isUser = message.role == MessageRole.user;
+    final citations = controller.citationsFor(message.id);
+
     return Padding(
       padding: const EdgeInsets.only(bottom: 20),
       child: Column(
-        crossAxisAlignment: isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+        crossAxisAlignment:
+            isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
         children: [
           Row(
-            mainAxisAlignment: isUser ? MainAxisAlignment.end : MainAxisAlignment.start,
+            mainAxisAlignment:
+                isUser ? MainAxisAlignment.end : MainAxisAlignment.start,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               if (!isUser) ...[
                 CircleAvatar(
                   radius: 14,
                   backgroundColor: theme.colorScheme.primaryContainer,
-                  child: Icon(Icons.auto_awesome, size: 16, color: theme.colorScheme.primary),
+                  child: Icon(Icons.auto_awesome,
+                      size: 16, color: theme.colorScheme.primary),
                 ),
                 const SizedBox(width: 10),
               ],
               Flexible(
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 18, vertical: 12),
                   decoration: BoxDecoration(
-                    gradient: isUser 
-                      ? LinearGradient(
-                          colors: [theme.colorScheme.primary, theme.colorScheme.primary.withOpacity(0.8)],
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                        )
-                      : null,
-                    color: isUser ? null : theme.colorScheme.surfaceContainerHighest.withOpacity(0.5),
+                    gradient: isUser
+                        ? LinearGradient(
+                            colors: [
+                              theme.colorScheme.primary,
+                              theme.colorScheme.primary.withValues(alpha: 0.8),
+                            ],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                          )
+                        : null,
+                    color: isUser
+                        ? null
+                        : theme.colorScheme.surfaceContainerHighest
+                            .withValues(alpha: 0.5),
                     borderRadius: BorderRadius.circular(20).copyWith(
                       bottomRight: isUser ? const Radius.circular(4) : null,
                       bottomLeft: !isUser ? const Radius.circular(4) : null,
@@ -296,9 +353,12 @@ class ChatScreen extends GetView<ChatController> {
                       ? _buildTypingIndicator(theme)
                       : MarkdownBody(
                           data: message.content,
-                          styleSheet: MarkdownStyleSheet.fromTheme(theme).copyWith(
+                          styleSheet:
+                              MarkdownStyleSheet.fromTheme(theme).copyWith(
                             p: theme.textTheme.bodyMedium?.copyWith(
-                              color: isUser ? theme.colorScheme.onPrimary : theme.colorScheme.onSurfaceVariant,
+                              color: isUser
+                                  ? theme.colorScheme.onPrimary
+                                  : theme.colorScheme.onSurfaceVariant,
                               fontSize: 16,
                             ),
                           ),
@@ -307,6 +367,10 @@ class ChatScreen extends GetView<ChatController> {
               ),
             ],
           ),
+
+          // Citations row — only for RAG responses
+          if (citations != null && citations.isNotEmpty)
+            _CitationsRow(citations: citations, theme: theme),
         ],
       ),
     );
@@ -325,16 +389,25 @@ class ChatScreen extends GetView<ChatController> {
               color: theme.colorScheme.primary.withAlpha(150),
               shape: BoxShape.circle,
             ),
-          ).animate(onPlay: (controller) => controller.repeat())
-           .scale(duration: 600.ms, delay: (index * 200).ms, begin: const Offset(1, 1), end: const Offset(1.5, 1.5))
-           .then()
-           .scale(duration: 600.ms, begin: const Offset(1.5, 1.5), end: const Offset(1, 1));
+          )
+              .animate(onPlay: (c) => c.repeat())
+              .scale(
+                  duration: 600.ms,
+                  delay: (index * 200).ms,
+                  begin: const Offset(1, 1),
+                  end: const Offset(1.5, 1.5))
+              .then()
+              .scale(
+                  duration: 600.ms,
+                  begin: const Offset(1.5, 1.5),
+                  end: const Offset(1, 1));
         }),
       ),
     );
   }
 
-  Widget _buildInputBar(ThemeData theme, TextEditingController textController, RxString inputText) {
+  Widget _buildInputBar(
+      ThemeData theme, TextEditingController textController, RxString inputText) {
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
       child: Row(
@@ -348,10 +421,11 @@ class ChatScreen extends GetView<ChatController> {
               child: TextField(
                 controller: textController,
                 onChanged: (val) => inputText.value = val,
-                decoration: InputDecoration(
+                decoration: const InputDecoration(
                   hintText: 'Ask me anything...',
                   border: InputBorder.none,
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                  contentPadding:
+                      EdgeInsets.symmetric(horizontal: 24, vertical: 16),
                 ),
                 maxLines: 5,
                 minLines: 1,
@@ -359,7 +433,7 @@ class ChatScreen extends GetView<ChatController> {
                   if (val.trim().isNotEmpty) {
                     controller.sendMessage(val);
                     textController.clear();
-                    inputText.value = "";
+                    inputText.value = '';
                   }
                 },
               ),
@@ -367,18 +441,142 @@ class ChatScreen extends GetView<ChatController> {
           ),
           const SizedBox(width: 12),
           Obx(() => IconButton.filled(
-            onPressed: controller.isSending.value || inputText.value.trim().isEmpty 
-              ? null 
-              : () {
-                  controller.sendMessage(textController.text);
-                  textController.clear();
-                  inputText.value = "";
-                },
-            icon: controller.isSending.value 
-              ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-              : const Icon(Icons.arrow_upward),
-            style: IconButton.styleFrom(minimumSize: const Size(56, 56)),
-          )),
+                onPressed:
+                    controller.isSending.value || inputText.value.trim().isEmpty
+                        ? null
+                        : () {
+                            controller.sendMessage(textController.text);
+                            textController.clear();
+                            inputText.value = '';
+                          },
+                icon: controller.isSending.value
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: Colors.white))
+                    : const Icon(Icons.arrow_upward),
+                style: IconButton.styleFrom(
+                    minimumSize: const Size(56, 56)),
+              )),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Sub-widgets ───────────────────────────────────────────────────────────────
+
+/// Library icon in AppBar with a badge showing ready document count.
+class _KbBadgeButton extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return IconButton(
+      icon: const Icon(Icons.library_books_rounded),
+      tooltip: 'Knowledge Base',
+      onPressed: () {
+        Get.to(
+          () => const KbManagerScreen(),
+          binding: KbManagerBinding(),
+        );
+      },
+    );
+  }
+}
+
+/// Collapsible citations row shown below RAG assistant messages.
+class _CitationsRow extends StatefulWidget {
+  final List<RagCitation> citations;
+  final ThemeData theme;
+
+  const _CitationsRow({required this.citations, required this.theme});
+
+  @override
+  State<_CitationsRow> createState() => _CitationsRowState();
+}
+
+class _CitationsRowState extends State<_CitationsRow> {
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 6, left: 40),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Toggle chip
+          GestureDetector(
+            onTap: () => setState(() => _expanded = !_expanded),
+            child: Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                color: widget.theme.colorScheme.secondaryContainer
+                    .withValues(alpha: 0.5),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.format_quote_rounded,
+                      size: 13,
+                      color: widget.theme.colorScheme.onSecondaryContainer),
+                  const SizedBox(width: 4),
+                  Text(
+                    '${widget.citations.length} source${widget.citations.length > 1 ? 's' : ''}',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color:
+                          widget.theme.colorScheme.onSecondaryContainer,
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  Icon(
+                    _expanded
+                        ? Icons.keyboard_arrow_up
+                        : Icons.keyboard_arrow_down,
+                    size: 14,
+                    color: widget.theme.colorScheme.onSecondaryContainer,
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          // Expanded citation chips
+          if (_expanded)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: widget.citations.map((c) {
+                  return Tooltip(
+                    message: c.preview,
+                    child: Chip(
+                      avatar: CircleAvatar(
+                        backgroundColor:
+                            widget.theme.colorScheme.primary,
+                        child: Text(
+                          '[${c.index}]',
+                          style: const TextStyle(
+                              color: Colors.white, fontSize: 9),
+                        ),
+                      ),
+                      label: Text(
+                        c.sourceLabel,
+                        style: const TextStyle(fontSize: 11),
+                      ),
+                      backgroundColor: widget.theme.colorScheme
+                          .secondaryContainer
+                          .withValues(alpha: 0.4),
+                    ),
+                  );
+                }).toList(),
+              ),
+            ),
         ],
       ),
     );
