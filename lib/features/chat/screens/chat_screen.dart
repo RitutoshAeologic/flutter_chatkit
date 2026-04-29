@@ -115,10 +115,10 @@ class _ChatScreenState extends State<ChatScreen> {
             SvgPicture.asset(
               'assets/svg/aeologic_logo.svg',
               height: 24,
-              colorFilter: ColorFilter.mode(
-                theme.colorScheme.primary,
-                BlendMode.srcIn,
-              ),
+              // colorFilter: ColorFilter.mode(
+              //   theme.colorScheme.primary,
+              //   BlendMode.srcIn,
+              // ),
             ),
             const SizedBox(width: 8),
             const Text(
@@ -283,18 +283,19 @@ class _EmptyState extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(40),
+      child: SingleChildScrollView(
+        child: Padding(
+          padding: const EdgeInsets.all(40),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             SvgPicture.asset(
               'assets/svg/aeologic_logo.svg',
               height: 80,
-              colorFilter: ColorFilter.mode(
-                theme.colorScheme.primary.withValues(alpha: 0.2),
-                BlendMode.srcIn,
-              ),
+              // colorFilter: ColorFilter.mode(
+              //   theme.colorScheme.primary.withValues(alpha: 0.2),
+              //   BlendMode.srcIn,
+              // ),
             ),
             const SizedBox(height: 24),
             Text(
@@ -314,7 +315,7 @@ class _EmptyState extends StatelessWidget {
           ],
         ).animate().fadeIn(duration: 600.ms),
       ),
-    );
+    ));
   }
 }
 
@@ -571,7 +572,7 @@ class _InputBar extends StatelessWidget {
                     onChanged: (v) => inputText.value = v,
                     decoration: InputDecoration(
                       hintText: isOnline
-                          ? 'Ask a question about your documents…'
+                          ? 'Ask a question..'
                           : 'No connection — questions queued when online',
                       border: InputBorder.none,
                       contentPadding: const EdgeInsets.symmetric(

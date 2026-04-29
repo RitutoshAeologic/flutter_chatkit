@@ -20,7 +20,6 @@ dependencies:
 
   # UI
   flutter_animate: ^4.5.0
-  google_fonts: ^6.2.1
   intl: ^0.19.0
 
   # ObjectBox — offline vector storage & search
@@ -48,6 +47,16 @@ flutter:
   assets:
     - assets/pdfs/
     - assets/svg/
-    # Add individual files here when you have PDFs:
-    # - assets/pdfs/product_manual.pdf
-    # - assets/pdfs/faq.pdf
+
+  # ── Bundled fonts (fully offline — no network needed in release builds) ────
+  fonts:
+    - family: Inter
+      fonts:
+        - asset: assets/fonts/Inter-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/Inter-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/Inter-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/Inter-Bold.ttf
+          weight: 700
