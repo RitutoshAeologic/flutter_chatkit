@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
-import 'package:flutter/foundation.dart';
 
 /// Lightweight wrapper around connectivity_plus.
 ///
@@ -10,7 +9,7 @@ import 'package:flutter/foundation.dart';
 /// firewall blocks). So we also do a lightweight HTTP HEAD check to confirm.
 ///
 /// Usage:
-///   final net = Get.find<NetworkService>();
+///   final net = Get.find\<NetworkService\>();
 ///   if (!await net.isOnline) { ... }
 ///   net.onlineStream.listen(...);
 class NetworkService {

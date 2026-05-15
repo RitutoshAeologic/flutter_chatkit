@@ -22,10 +22,17 @@ import '../models/message.dart';
 ///   3a. [AppConfig.useGroqForResponse = false] → format extracted chunks as answer
 ///   3b. [AppConfig.useGroqForResponse = true]  → Groq formats the chunks into prose
 ///       but is strictly grounded (no external knowledge allowed via system prompt)
-///   4. If no chunks found → hard "not found" reply. Groq is NEVER used as fallback.
+///   4a. If no chunks found AND [AppConfig.useGroqFallback = true] AND Groq key set
+///       → Groq answers from its own general knowledge with a clear disclaimer.
+///   4b. If no chunks found AND fallback disabled/no key → hard "not found" reply.
 class ChatController extends GetxController {
   final RagRetrievalService _retrieval = Get.find<RagRetrievalService>();
   final _uuid = const Uuid();
+
+  /// 🛠 DEVELOPER FLAG: Toggle this and hot-restart to test fallback behaviour!
+  /// true  = Use PDF knowledge first, fall back to general knowledge if not found.
+  /// false = STRICT mode. Only use PDF knowledge. Refuse to answer if not found.
+  bool devUseGroqFallback = false;
 
   // ── Reactive state ─────────────────────────────────────────────────────────
   final messages  = <ChatMessage>[].obs;
@@ -73,16 +80,27 @@ class ChatController extends GetxController {
       debugPrint('ChatController: retrieve = ${sw.elapsedMilliseconds}ms '
           '(hasContext: ${result.hasContext})');
 
-      // ── 2. No chunks found → hard cutoff, no Groq fallback ────────────
+      // ── 2. No chunks found → try Groq general knowledge fallback ─────────
       if (!result.hasContext) {
-        _replaceLoading(placeholderId, ChatMessage(
-          id: _uuid.v4(),
-          content:
-              '❌ No relevant information found in the loaded documents.\n\n'
-              'The knowledge base does not contain an answer to this question.',
-          role: MessageRole.assistant,
-          createdAt: DateTime.now(),
-        ));
+        if (devUseGroqFallback && AppConfig.groqApiKey.isNotEmpty) {
+          debugPrint('ChatController: no RAG context → Groq general-knowledge fallback');
+          final fallbackAnswer = await _callGroqFallback(query);
+          _replaceLoading(placeholderId, ChatMessage(
+            id: _uuid.v4(),
+            content: fallbackAnswer,
+            role: MessageRole.assistant,
+            createdAt: DateTime.now(),
+          ));
+        } else {
+          _replaceLoading(placeholderId, ChatMessage(
+            id: _uuid.v4(),
+            content:
+                '❌ No relevant information found in the loaded documents.\n\n'
+                'The knowledge base does not contain an answer to this question.',
+            role: MessageRole.assistant,
+            createdAt: DateTime.now(),
+          ));
+        }
         return;
       }
 
@@ -203,17 +221,14 @@ class ChatController extends GetxController {
     }).join('\n\n');
 
     final userMessage = '''
-=== DOCUMENT EXCERPTS (your ONLY allowed source) ===
+Here are the relevant excerpts from the uploaded documents:
 
 $trimmedBlock
 
-=== END OF EXCERPTS ===
-
-Using ONLY the excerpts above (do not use any outside knowledge), answer concisely:
+---
+Based ONLY on the excerpts above, please write a clear, summarised answer to this question:
 
 $query
-
-If the answer is not in the excerpts, say exactly "I couldn't find this information in the loaded documents."
 ''';
 
     final groqMessages = [
@@ -233,14 +248,14 @@ If the answer is not in the excerpts, say exactly "I couldn't find this informat
             body: jsonEncode({
               'model': AppConfig.chatModel,
               'messages': groqMessages,
-              'max_tokens': 512,
-              'temperature': 0.1,
+              'max_tokens': 1024,
+              'temperature': 0.2,
             }),
           )
           .timeout(
-            const Duration(seconds: 20),
+            const Duration(seconds: 30),
             onTimeout: () => throw TimeoutException(
-                'Groq timed out', const Duration(seconds: 20)),
+                'Groq timed out', const Duration(seconds: 30)),
           );
     } on SocketException {
       throw Exception(NetworkService.messageFor(NetworkErrorType.noInternet));
@@ -266,6 +281,68 @@ If the answer is not in the excerpts, say exactly "I couldn't find this informat
     final usage = data['usage'] as Map<String, dynamic>?;
     if (usage != null) {
       debugPrint('ChatController: Groq tokens → '
+          'prompt=${usage['prompt_tokens']} '
+          'completion=${usage['completion_tokens']}');
+    }
+
+    return content.trim();
+  }
+
+  /// Calls Groq as a general-purpose assistant when the local KB has no answer.
+  /// The reply is clearly labelled as coming from general knowledge, not documents.
+  Future<String> _callGroqFallback(String query) async {
+    if (AppConfig.groqApiKey.isEmpty) {
+      return '❌ No relevant information found in the loaded documents.\n\n'
+          'The knowledge base does not contain an answer to this question.';
+    }
+
+    final http.Response response;
+    try {
+      response = await http
+          .post(
+            Uri.parse(AppConfig.chatUrl),
+            headers: {
+              'Authorization': 'Bearer ${AppConfig.groqApiKey}',
+              'Content-Type': 'application/json',
+            },
+            body: jsonEncode({
+              'model': AppConfig.chatModel,
+              'messages': [
+                {'role': 'system', 'content': AppConfig.groqFallbackSystemPrompt},
+                {'role': 'user', 'content': query},
+              ],
+              'max_tokens': 1024,
+              'temperature': 0.7,
+            }),
+          )
+          .timeout(
+            const Duration(seconds: 30),
+            onTimeout: () => throw TimeoutException(
+                'Groq fallback timed out', const Duration(seconds: 30)),
+          );
+    } on SocketException {
+      throw Exception(NetworkService.messageFor(NetworkErrorType.noInternet));
+    } on TimeoutException {
+      throw Exception(NetworkService.messageFor(NetworkErrorType.timeout));
+    }
+
+    if (response.statusCode == 401 || response.statusCode == 403) {
+      throw Exception(NetworkService.messageFor(NetworkErrorType.authError));
+    }
+    if (response.statusCode == 429) {
+      throw Exception(NetworkService.messageFor(NetworkErrorType.rateLimited));
+    }
+    if (response.statusCode != 200) {
+      throw Exception('Groq fallback API ${response.statusCode}: ${response.body}');
+    }
+
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    final content =
+        (data['choices'] as List).first['message']['content'] as String;
+
+    final usage = data['usage'] as Map<String, dynamic>?;
+    if (usage != null) {
+      debugPrint('ChatController: Groq fallback tokens → '
           'prompt=${usage['prompt_tokens']} '
           'completion=${usage['completion_tokens']}');
     }

@@ -257,7 +257,7 @@ class EmbeddingService {
 
   List<double> _l2Normalize(List<double> v) {
     double sumSq = 0.0;
-    for (final x in v) sumSq += x * x;
+    for (final x in v) { sumSq += x * x; }
     if (sumSq == 0.0) return v;
     final invNorm = 1.0 / sqrt(sumSq);
     return v.map((x) => x * invNorm).toList();

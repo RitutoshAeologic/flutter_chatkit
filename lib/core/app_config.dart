@@ -6,49 +6,77 @@ class AppConfig {
   // ── Jina AI — embedding only (called during ingestion, NOT during chat) ───
   static const String jinaApiKey = String.fromEnvironment(
     'JINA_API_KEY',
-    defaultValue: 'jina_ec89226c13254adf834fe581502ad6e6CXia9f6ZFPgVeprjrAySnnInvuZo',
+    defaultValue: '',
   );
   static const String embedUrl   = 'https://api.jina.ai/v1/embeddings';
   static const String embedModel = 'jina-embeddings-v2-base-en'; // 768-dim
 
   // ── Optional Groq — response formatter (grounded to retrieved chunks only) ─
-  // true  → Groq formats the retrieved chunks into natural-language prose.
+  // true  → Groq formats the retrieved chunks into a clear, summarised answer.
   // false → raw extracted chunks shown (fully offline, no API call).
-  // IMPORTANT: Groq is NEVER called when no chunks are found (hard cutoff).
-  static const bool useGroqForResponse = true; // ← enabled for user-friendly answers
+  static const bool useGroqForResponse = true;
 
   static const String groqApiKey = String.fromEnvironment(
     'GROQ_API_KEY',
     defaultValue: '', // inject via: --dart-define=GROQ_API_KEY=gsk_...
   );
   static const String chatUrl   = 'https://api.groq.com/openai/v1/chat/completions';
-  static const String chatModel = 'llama-3.1-8b-instant';
+  static const String chatModel = 'llama-3.1-8b-instant'; // Ultra-fast response time
 
-  // ── Strict grounding system prompt ────────────────────────────────────────
-  // This prompt PREVENTS Groq from using its own training knowledge.
-  // Every answer must be traceable to the provided document excerpts.
+  // ── Grounded system prompt ────────────────────────────────────────────────
+  // Rules:
+  //  • Summarise the relevant excerpts into a clear, flowing answer.
+  //  • Never use knowledge outside the provided excerpts.
+  //  • If the answer is absent, say so clearly.
   static const String groqSystemPrompt =
-      'You are a document Q\u0026A assistant with access ONLY to the excerpts below. '
-      'Rules you must NEVER break:\n'
-      '1. Answer ONLY from the provided excerpts. Zero exceptions.\n'
-      '2. Do NOT use any external knowledge, training data, or general facts.\n'
-      '3. If the answer is not clearly stated in the excerpts, respond EXACTLY: '
-      '"I couldn\'t find this information in the loaded documents."\n'
-      '4. Never infer, guess, or extrapolate beyond what the excerpts say.\n'
-      '5. Always cite the source label (e.g. [1], [2]) for every fact you state.\n'
-      '6. Write in clear, friendly, plain language — summarise the excerpt naturally.\n'
-      'Excerpts are labelled [1], [2], etc. with their source file.\n'
-      'Begin every response by citing which excerpt(s) you are drawing from.';
+      'You are a precise document Q&A assistant. '
+      'You are given numbered excerpts from uploaded documents. '
+      'Your job is to read those excerpts carefully and write a clear, '
+      'concise, well-summarised answer to the user\'s question.\n\n'
+      'STRICT RULES — never break these:\n'
+      '1. Use ONLY information from the provided excerpts. '
+      'Do NOT use any outside knowledge, training data, or general facts.\n'
+      '2. Write a proper summary paragraph — not bullet dumps of raw text.\n'
+      '3. Always mention which excerpt(s) you drew from, e.g. "According to [1]...".\n'
+      '4. If the answer is not clearly present in the excerpts, respond EXACTLY:\n'
+      '   "⚠️ I couldn\'t find this information in the uploaded documents."\n'
+      '5. Never guess, infer, or extrapolate beyond what the excerpts state.\n'
+      '6. Keep answers concise: 2–5 sentences unless more detail is clearly needed.';
+
+  // ── Groq fallback prompt (used when KB has NO matching chunks) ───────────
+  // When cosine similarity is below the threshold for ALL chunks,
+  // Groq uses its general knowledge and clearly labels the answer.
+  static const bool useGroqFallback = bool.fromEnvironment(
+    'USE_GROQ_FALLBACK',
+    defaultValue: true,
+  );
+
+  static const String groqFallbackSystemPrompt =
+      'You are a helpful, knowledgeable AI assistant. '
+      'The user asked a question and no relevant information was found in their '
+      'uploaded documents. '
+      'Answer the question helpfully using your general knowledge. '
+      'Be concise and clear. '
+      'Always end your reply with this exact line on its own:\n'
+      '⚠️ *This answer comes from Groq\'s general knowledge — '
+      'not from your uploaded documents.*';
 
   // ── RAG retrieval tuning ──────────────────────────────────────────────────
-  static const double similarityThreshold  = 0.25;  // wider net for short queries
-  static const int    topKChunks           = 3;     // 5→3: ~850 Groq prompt tokens vs 1400
-  static const int    chunkContextMaxChars = 600;   // trim chunks before sending to Groq
+  // Raised from 0.40 → 0.75. Jina embeddings cluster heavily around 0.60-0.65
+  // even for completely unrelated text (noise). A score < 0.75 is typically off-topic.
+  static const double similarityThreshold  = 0.75;
+
+  // Send top-5 chunks so Groq has rich context for summarisation.
+  static const int    topKChunks           = 5;
+
+  // Give Groq more text per chunk so it can summarise properly.
+  static const int    chunkContextMaxChars = 900;
+
   static const int    embeddingDimensions  = 768;
 
   // ── Asset ingestion ───────────────────────────────────────────────────────
   static const int    maxFileSizeBytes    = 50 * 1024 * 1024;
-  static const String pdfAssetPrefix     = 'assets/pdfs/'; // all bundled PDFs live here
+  static const String pdfAssetPrefix     = 'assets/pdfs/';
 
   // ── Chunking ──────────────────────────────────────────────────────────────
   static const int chunkWordWindow  = 150;
@@ -57,7 +85,7 @@ class AppConfig {
   static const int chunkMinChars    = 30;
 
   // ── EmbeddingService internals ────────────────────────────────────────────
-  static const int embedCacheMaxSize = 200; // increased: covers more repeat queries
+  static const int embedCacheMaxSize = 200;
   static const int embedBatchSize    = 96;
   static const int embedMaxRetries   = 3;
 }

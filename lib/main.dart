@@ -11,6 +11,7 @@ import 'data/document_chunk.dart';
 import 'data/object_box_store.dart';
 import 'data/source_document.dart';
 import 'domain/rag_retrieval_service.dart';
+import 'domain/user_pdf_ingestion_service.dart';
 import 'objectbox.g.dart';
 import 'app.dart';
 
@@ -51,7 +52,13 @@ void main() async {
   );
   Get.put<AssetIngestionService>(assetIngestion, permanent: true);
 
-  // ── 6. Decide initial route ───────────────────────────────────────────────
+  // ── 6. UserPdfIngestionService ────────────────────────────────────────────
+  Get.put<UserPdfIngestionService>(
+    UserPdfIngestionService(obx: obx, embedder: embedder, retrieval: retrieval),
+    permanent: true,
+  );
+
+  // ── 7. Decide initial route ───────────────────────────────────────────────
   // First install (or reinstall): show ingestion screen to index bundled PDFs.
   // Subsequent launches: skip straight to chat (ObjectBox already populated).
   final needsIngest = await assetIngestion.needsIngestion();
