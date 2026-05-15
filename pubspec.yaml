@@ -31,6 +31,9 @@ dependencies:
   crypto: ^3.0.3
   flutter_svg: ^2.2.4
   file_picker: ^8.1.7       # user PDF upload from device storage
+  firebase_core: ^4.9.0
+  firebase_auth: ^6.5.1
+  firebase_database: ^12.4.1
 
 dev_dependencies:
   flutter_test:

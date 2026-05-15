@@ -1,6 +1,8 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
+import 'package:flutter/foundation.dart';
 import 'package:get/get.dart';
+import '../../../core/asset_ingestion_service.dart';
 import '../../../core/routes/app_routes.dart';
 
 class AuthController extends GetxController {
@@ -19,10 +21,10 @@ class AuthController extends GetxController {
         email: email.trim(),
         password: password,
       );
-      Get.offAllNamed(AppRoutes.chat);
+      await _navigateAfterLogin();
     } on FirebaseAuthException catch (e) {
-      print(e.message);
-      print(e.code);
+      debugPrint(e.message);
+      debugPrint(e.code);
       if (e.message == 'The supplied auth credential is incorrect, malformed or has expired.' || e.code == 'user-not-found') {
         await _createAccount(email.trim(), password);
       } else {
@@ -30,7 +32,7 @@ class AuthController extends GetxController {
       }
     //  errorMessage.value = e.message;
     } catch (e) {
-      print(e.toString());
+      debugPrint(e.toString());
 
       errorMessage.value = "An unexpected error occurred.";
     } finally {
@@ -53,10 +55,10 @@ class AuthController extends GetxController {
         "createdAt": ServerValue.timestamp,
       });
 
-      Get.offAllNamed(AppRoutes.chat);
+      await _navigateAfterLogin();
 
     } on FirebaseAuthException catch (e) {
-      print(e.message);
+      debugPrint(e.message);
       if(e.message == "The email address is already in use by another account.") {
         errorMessage.value = "Invalid Password.";
       } else {
@@ -67,5 +69,20 @@ class AuthController extends GetxController {
   Future<void> signOut() async {
     await _auth.signOut();
     Get.offAllNamed(AppRoutes.auth);
+  }
+
+  Future<void> _navigateAfterLogin() async {
+    try {
+      final assetIngestion = Get.find<AssetIngestionService>();
+      final needsIngest = await assetIngestion.needsIngestion();
+      if (needsIngest) {
+        Get.offAllNamed(AppRoutes.ingestion);
+      } else {
+        Get.offAllNamed(AppRoutes.chat);
+      }
+    } catch (e) {
+      // Fallback if service not ready
+      Get.offAllNamed(AppRoutes.chat);
+    }
   }
 }

@@ -12,6 +12,7 @@ import '../../../core/network_service.dart';
 import '../../../core/routes/app_routes.dart';
 import '../../../data/rag_models.dart';
 import '../../../domain/rag_retrieval_service.dart';
+import '../../../domain/chat_sync_service.dart';
 import '../models/message.dart';
 
 /// Offline extractive-RAG chat controller.
@@ -27,6 +28,7 @@ import '../models/message.dart';
 ///   4b. If no chunks found AND fallback disabled/no key → hard "not found" reply.
 class ChatController extends GetxController {
   final RagRetrievalService _retrieval = Get.find<RagRetrievalService>();
+  final ChatSyncService _syncService = Get.put(ChatSyncService());
   final _uuid = const Uuid();
 
   /// 🛠 DEVELOPER FLAG: Toggle this and hot-restart to test fallback behaviour!
@@ -41,9 +43,23 @@ class ChatController extends GetxController {
   final _citationsMap = <String, List<RagCitation>>{};
   List<RagCitation>? citationsFor(String id) => _citationsMap[id];
 
+  @override
+  void onInit() {
+    super.onInit();
+    _loadHistory();
+  }
+
+  Future<void> _loadHistory() async {
+    final history = await _syncService.loadMessages();
+    if (history.isNotEmpty) {
+      messages.assignAll(history);
+    }
+  }
+
   void clearChat() {
     messages.clear();
     _citationsMap.clear();
+    _syncService.clearHistory();
   }
 
   void goToKbViewer() => Get.toNamed(AppRoutes.kbViewer);
@@ -56,12 +72,14 @@ class ChatController extends GetxController {
 
     isSending.value = true;
 
-    messages.add(ChatMessage(
+    final userMsg = ChatMessage(
       id: _uuid.v4(),
       content: query,
       role: MessageRole.user,
       createdAt: DateTime.now(),
-    ));
+    );
+    messages.add(userMsg);
+    _syncService.saveMessage(userMsg); // Sync user message
 
     final placeholderId = 'loading-${_uuid.v4()}';
     messages.add(ChatMessage(
@@ -219,6 +237,7 @@ class ChatController extends GetxController {
     } else {
       messages.add(reply);
     }
+    _syncService.saveMessage(reply); // Sync assistant reply
   }
 
   String _formatExtractiveAnswer(RagRetrievalResult result) {

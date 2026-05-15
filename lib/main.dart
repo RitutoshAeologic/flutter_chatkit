@@ -12,11 +12,17 @@ import 'data/object_box_store.dart';
 import 'data/source_document.dart';
 import 'domain/rag_retrieval_service.dart';
 import 'domain/user_pdf_ingestion_service.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'firebase_options.dart';
 import 'objectbox.g.dart';
 import 'app.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
 
   // ── 1. ObjectBox ───────────────────────────────────────────────────────────
   final store = await openStore();
@@ -59,10 +65,17 @@ void main() async {
   );
 
   // ── 7. Decide initial route ───────────────────────────────────────────────
-  // First install (or reinstall): show ingestion screen to index bundled PDFs.
-  // Subsequent launches: skip straight to chat (ObjectBox already populated).
-  final needsIngest = await assetIngestion.needsIngestion();
-  final initialRoute = needsIngest ? AppRoutes.ingestion : AppRoutes.chat;
+  final currentUser = FirebaseAuth.instance.currentUser;
+  
+  String initialRoute;
+  if (currentUser == null) {
+    initialRoute = AppRoutes.auth;
+  } else {
+    // First install (or reinstall): show ingestion screen to index bundled PDFs.
+    // Subsequent launches: skip straight to chat (ObjectBox already populated).
+    final needsIngest = await assetIngestion.needsIngestion();
+    initialRoute = needsIngest ? AppRoutes.ingestion : AppRoutes.chat;
+  }
 
   runApp(ChatKitApp(initialRoute: initialRoute));
 }

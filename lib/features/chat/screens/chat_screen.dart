@@ -6,10 +6,12 @@ import 'package:flutter_svg/flutter_svg.dart';
 import 'package:get/get.dart';
 
 import '../../../core/network_service.dart';
+import '../../../core/routes/app_routes.dart';
 import '../../../data/rag_models.dart';
 import '../../../domain/user_pdf_ingestion_service.dart';
 import '../controllers/chat_controller.dart';
 import '../models/message.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 class ChatScreen extends StatefulWidget {
   const ChatScreen({super.key});
@@ -156,6 +158,26 @@ class _ChatScreenState extends State<ChatScreen> {
                   ],
                 ));
               }
+            },
+          ),
+          IconButton(
+            icon: const Icon(Icons.logout),
+            tooltip: 'Sign out',
+            onPressed: () async {
+              Get.dialog(AlertDialog(
+                title: const Text('Sign out?'),
+                content: const Text('You will need to sign in again to view your synced chats.'),
+                actions: [
+                  TextButton(onPressed: Get.back, child: const Text('Cancel')),
+                  TextButton(
+                    onPressed: () async {
+                      await FirebaseAuth.instance.signOut();
+                      Get.offAllNamed(AppRoutes.auth);
+                    },
+                    child: const Text('Sign out', style: TextStyle(color: Colors.red)),
+                  ),
+                ],
+              ));
             },
           ),
         ],
