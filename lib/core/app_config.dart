@@ -18,10 +18,10 @@ class AppConfig {
 
   static const String groqApiKey = String.fromEnvironment(
     'GROQ_API_KEY',
-    defaultValue: '', // inject via: --dart-define=GROQ_API_KEY=gsk_...
+    defaultValue: '',
   );
   static const String chatUrl   = 'https://api.groq.com/openai/v1/chat/completions';
-  static const String chatModel = 'llama-3.1-8b-instant'; // Ultra-fast response time
+  static const String chatModel = 'llama-3.3-70b-versatile'; // smarter model = better summaries
 
   // ── Grounded system prompt ────────────────────────────────────────────────
   // Rules:

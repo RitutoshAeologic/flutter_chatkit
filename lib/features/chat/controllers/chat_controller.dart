@@ -73,9 +73,15 @@ class ChatController extends GetxController {
     ));
 
     try {
-      // ── 1. Retrieve from ObjectBox (fully offline) ─────────────────────
+      // ── 0. Fast Typo Correction ──────────────────────────────────────────
+      final correctedQuery = await _correctQueryTypos(query);
+      if (correctedQuery != query) {
+        debugPrint('ChatController: Corrected typo "$query" ➔ "$correctedQuery"');
+      }
+
+      // ── 1. Retrieve from ObjectBox (using corrected query) ─────────────────
       final sw = Stopwatch()..start();
-      final result = await _retrieval.retrieve(query);
+      final result = await _retrieval.retrieve(correctedQuery);
       sw.stop();
       debugPrint('ChatController: retrieve = ${sw.elapsedMilliseconds}ms '
           '(hasContext: ${result.hasContext})');
@@ -164,6 +170,47 @@ class ChatController extends GetxController {
   }
 
   // ── Helpers ────────────────────────────────────────────────────────────────
+
+  /// Uses an ultra-fast Groq call to fix typos before embedding.
+  /// This ensures "hame lane" becomes "home loan" so Jina can find the right chunks.
+  Future<String> _correctQueryTypos(String query) async {
+    if (AppConfig.groqApiKey.isEmpty) return query;
+
+    try {
+      final response = await http
+          .post(
+            Uri.parse(AppConfig.chatUrl),
+            headers: {
+              'Authorization': 'Bearer ${AppConfig.groqApiKey}',
+              'Content-Type': 'application/json',
+            },
+            body: jsonEncode({
+              // Force ultra-fast model for this tiny pre-processing step
+              'model': 'llama-3.1-8b-instant', 
+              'messages': [
+                {
+                  'role': 'system',
+                  'content': 'You are a search query spelling corrector. Your ONLY job is to fix typos and spelling mistakes in the user\'s query. Output NOTHING else except the corrected query. Do not answer the question. If the query is already correct, output it exactly as is.'
+                },
+                {'role': 'user', 'content': query},
+              ],
+              'max_tokens': 60,
+              'temperature': 0.0,
+            }),
+          )
+          .timeout(const Duration(seconds: 4));
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final corrected = (data['choices'] as List).first['message']['content'] as String;
+        // Strip out quotes if the model added them
+        return corrected.replaceAll('"', '').trim();
+      }
+    } catch (e) {
+      debugPrint('ChatController: Typo correction failed/timed out: $e');
+    }
+    return query;
+  }
 
   void _replaceLoading(String placeholderId, ChatMessage reply) {
     final idx = messages.indexWhere((m) => m.id == placeholderId);
