@@ -22,6 +22,11 @@ class ChatService {
   static const String _groqUrl = 'https://api.groq.com/openai/v1/chat/completions';
   static const String _groqModel = 'llama-3.3-70b-versatile';
 
+  // Pollinations API Configuration
+  static String get _pollinationsKey => dotenv.env['POLLINATIONS_API_KEY'] ?? '';
+  static bool get _hasPollinationsKey =>
+      _pollinationsKey.isNotEmpty && !_pollinationsKey.startsWith('YOUR');
+
   /// Sends a message directly to Groq.
   Future<ChatMessage> sendMessage(String text, {List<ChatMessage>? history}) async {
     try {
@@ -78,37 +83,49 @@ class ChatService {
     }
   }
 
-  /// Generates an image using Pollinations.ai with enhanced parameters.
-  /// Falls back to LoremFlickr if Pollinations returns 402 (payment/rate limit) or other error codes.
+  /// Generates an image using Pollinations.ai (gen.pollinations.ai with API key).
+  /// Falls back to Picsum Photos if no key is configured or on any error.
   Future<String> generateImage(String prompt) async {
-    try {
-      final encodedPrompt = Uri.encodeComponent(prompt);
-      final seed = DateTime.now().millisecondsSinceEpoch;
-      final imageUrl = "https://image.pollinations.ai/prompt/$encodedPrompt?width=1024&height=1024&nologo=true&seed=$seed";
+    // Primary: gen.pollinations.ai with API key (requires POLLINATIONS_API_KEY in .env)
+    if (_hasPollinationsKey) {
+      try {
+        final encodedPrompt = Uri.encodeComponent(prompt);
+        final seed = DateTime.now().millisecondsSinceEpoch % 99999;
+        final imageUrl =
+            'https://gen.pollinations.ai/image/$encodedPrompt'
+            '?model=flux&width=1024&height=1024&seed=$seed&enhance=true'
+            '&key=$_pollinationsKey';
 
-      // Test the URL headers to check if it returns 200 or 402/error
-      final client = http.Client();
-      final request = http.Request('GET', Uri.parse(imageUrl));
-      final streamedResponse = await client.send(request).timeout(const Duration(seconds: 8));
-      
-      if (streamedResponse.statusCode == 200) {
-        // Abort stream to avoid downloading the body
-        streamedResponse.stream.listen((_) {}).cancel();
-        client.close();
-        return imageUrl;
-      } else {
-        print("Pollinations returned status ${streamedResponse.statusCode}, falling back to LoremFlickr");
-        client.close();
-        final cleanedPrompt = prompt.replaceAll(RegExp(r'[^a-zA-Z0-9\s]'), '');
-        final tags = cleanedPrompt.split(' ').where((w) => w.isNotEmpty).map((e) => Uri.encodeComponent(e)).join(',');
-        return "https://loremflickr.com/1024/1024/$tags";
-      }
-    } catch (e) {
-      print("Image verification failed: $e, falling back to LoremFlickr");
-      final cleanedPrompt = prompt.replaceAll(RegExp(r'[^a-zA-Z0-9\s]'), '');
-      final tags = cleanedPrompt.split(' ').where((w) => w.isNotEmpty).map((e) => Uri.encodeComponent(e)).join(',');
-      return "https://loremflickr.com/1024/1024/$tags";
+        final client = http.Client();
+        try {
+          final request = http.Request('GET', Uri.parse(imageUrl));
+          final streamedResponse = await client
+              .send(request)
+              .timeout(const Duration(seconds: 30));
+
+          if (streamedResponse.statusCode == 200) {
+            streamedResponse.stream.listen((_) {}).cancel();
+            client.close();
+            print('✅ Pollinations image generated successfully.');
+            return imageUrl;
+          }
+          print('Pollinations returned ${streamedResponse.statusCode}, using fallback.');
+          client.close();
+        } catch (e) {
+          print('Pollinations request failed: $e, using fallback.');
+          client.close();
+        }
+      } catch (_) {}
+    } else {
+      print('No POLLINATIONS_API_KEY set — using Picsum fallback.');
     }
+
+    // Fallback: Picsum Photos — always returns 200 with a beautiful real photo.
+    // Seed combines prompt hash + minute-of-day for variety without being random.
+    final promptHash = prompt.codeUnits.fold(0, (prev, cu) => prev + cu);
+    final timeVariant = DateTime.now().minute;
+    final seed = (promptHash + timeVariant) % 1000;
+    return 'https://picsum.photos/seed/$seed/1024/1024';
   }
 
   /// Creates or gets a session in Realtime Database.
