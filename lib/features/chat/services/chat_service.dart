@@ -79,16 +79,35 @@ class ChatService {
   }
 
   /// Generates an image using Pollinations.ai with enhanced parameters.
+  /// Falls back to LoremFlickr if Pollinations returns 402 (payment/rate limit) or other error codes.
   Future<String> generateImage(String prompt) async {
     try {
       final encodedPrompt = Uri.encodeComponent(prompt);
       final seed = DateTime.now().millisecondsSinceEpoch;
       final imageUrl = "https://image.pollinations.ai/prompt/$encodedPrompt?width=1024&height=1024&nologo=true&seed=$seed";
 
-      return imageUrl;
+      // Test the URL headers to check if it returns 200 or 402/error
+      final client = http.Client();
+      final request = http.Request('GET', Uri.parse(imageUrl));
+      final streamedResponse = await client.send(request).timeout(const Duration(seconds: 8));
+      
+      if (streamedResponse.statusCode == 200) {
+        // Abort stream to avoid downloading the body
+        streamedResponse.stream.listen((_) {}).cancel();
+        client.close();
+        return imageUrl;
+      } else {
+        print("Pollinations returned status ${streamedResponse.statusCode}, falling back to LoremFlickr");
+        client.close();
+        final cleanedPrompt = prompt.replaceAll(RegExp(r'[^a-zA-Z0-9\s]'), '');
+        final tags = cleanedPrompt.split(' ').where((w) => w.isNotEmpty).map((e) => Uri.encodeComponent(e)).join(',');
+        return "https://loremflickr.com/1024/1024/$tags";
+      }
     } catch (e) {
-      print("Image generation failed: $e");
-      throw Exception('Failed to generate image. Please try again.');
+      print("Image verification failed: $e, falling back to LoremFlickr");
+      final cleanedPrompt = prompt.replaceAll(RegExp(r'[^a-zA-Z0-9\s]'), '');
+      final tags = cleanedPrompt.split(' ').where((w) => w.isNotEmpty).map((e) => Uri.encodeComponent(e)).join(',');
+      return "https://loremflickr.com/1024/1024/$tags";
     }
   }
 
