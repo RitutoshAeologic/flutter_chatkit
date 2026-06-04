@@ -17,7 +17,7 @@ class ChatService {
   factory ChatService() => _instance;
 
   // Groq API Configuration
-  static const String _groqApiKey = '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';
+  static const String _groqApiKey = '';
   static const String _groqUrl = 'https://api.groq.com/openai/v1/chat/completions';
   static const String _groqModel = 'llama-3.3-70b-versatile';
 
