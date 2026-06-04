@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:firebase_database/firebase_database.dart';
 import 'package:uuid/uuid.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import '../models/message.dart';
 import '../models/chat_session.dart';
 
@@ -17,7 +18,7 @@ class ChatService {
   factory ChatService() => _instance;
 
   // Groq API Configuration
-  static const String _groqApiKey = '';
+  static String get _groqApiKey => dotenv.env['GROQ_API_KEY'] ?? '';
   static const String _groqUrl = 'https://api.groq.com/openai/v1/chat/completions';
   static const String _groqModel = 'llama-3.3-70b-versatile';
 
